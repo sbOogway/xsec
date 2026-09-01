@@ -4,4 +4,12 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-nautilus-core = "=0.62.0"
+nautilus-core = { version = "0.61" }
+nautilus-common = { version = "0.61" }
+nautilus-model = { version = "0.61" }
+nautilus-trading = { version = "0.61" }
+nautilus-bybit = { version = "0.61" }
+nautilus-backtest = { version = "0.61" }
+nautilus-live = { version = "0.61" }
+bon = "3.10.0"
+anyhow = "1.0.104"
