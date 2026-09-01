@@ -1,9 +1,10 @@
-use std::{fmt::Debug, time::Duration};
+use std::{fmt::Debug, str::FromStr, time::Duration};
 
-use nautilus_common::{actor::DataActor, enums::Environment, timer::TimeEvent};
+use nautilus_common::{actor::DataActor, enums::Environment, log_info, timer::TimeEvent};
+use nautilus_core::UnixNanos;
 use nautilus_model::{
     enums::{AccountType, BookType, OmsType},
-    identifiers::{StrategyId, Venue},
+    identifiers::{InstrumentId, StrategyId, Venue},
     types::Money,
 };
 use nautilus_trading::{Strategy, StrategyConfig, StrategyCore, nautilus_strategy};
@@ -14,20 +15,22 @@ use nautilus_backtest::{
 };
 use nautilus_live::node::LiveNode;
 
+mod data;
+
 const ENVIRONMENT: Environment = Environment::Backtest;
 const BASES: [&str; 2] = ["BTC", "ETH"];
 
 #[derive(bon::Builder)]
 pub struct XSectionalMomentum {
     #[builder(default = StrategyCore::new(StrategyConfig {
-         strategy_id: Some(StrategyId::from("XSECMOM")),
+         strategy_id: Some(StrategyId::from("X-SEC-MOM")),
          order_id_tag:Some("001".to_string()),
          ..Default::default()
     }))]
     core: StrategyCore,
 
-    #[builder(default = BASES.into_iter().map(String::from).collect())]
-    symbols: Vec<String>,
+    #[builder(default = BASES.into_iter().map(|base|{format!("{}USDT-LINEAR.BYBIT", base)}).map(InstrumentId::from).collect())]
+    symbols: Vec<InstrumentId>,
 
     #[builder(default = 12)]
     months: u16,
@@ -58,9 +61,21 @@ impl DataActor for XSectionalMomentum {
         )?;
         anyhow::Ok(())
     }
+
+    fn on_time_event(&mut self, event: &TimeEvent) -> anyhow::Result<()> {
+        log::info!("hello from on_time_event {}", event);
+
+        for symbol in &self.symbols {
+            // let _symbol = symbol.as_str();
+            let quote = self.cache().quote(symbol);
+        }
+        anyhow::Ok(())
+    }
 }
 
 fn main() {
+    nautilus_common::logging::ensure_logging_initialized();
+
     match ENVIRONMENT {
         Environment::Backtest => {
             let mut engine = BacktestEngine::new(BacktestEngineConfig::default()).unwrap();
@@ -69,7 +84,7 @@ fn main() {
             engine
                 .add_venue(
                     SimulatedVenueConfig::builder()
-                        .venue(Venue::from("BACKTEST"))
+                        .venue(Venue::from("BYBIT"))
                         .oms_type(OmsType::Hedging)
                         .account_type(AccountType::Margin)
                         .book_type(BookType::L1_MBP)
@@ -79,9 +94,23 @@ fn main() {
                 )
                 .unwrap();
 
-            engine.add_data(data, None, true, true);
+            let symbols: Vec<InstrumentId> = BASES
+                .iter()
+                .map(|b| InstrumentId::from(format!("{b}USDT-LINEAR.BYBIT").as_str()))
+                .collect();
+            let rt = tokio::runtime::Runtime::new().unwrap();
+            rt.block_on(data::ensure_data(&symbols)).unwrap();
+
+            for id in &symbols {
+                let bars = data::load_data(id).unwrap();
+                log::info!("loaded {} bars for {}", bars.len(), id);
+                engine.add_data(bars, None, false, true).unwrap();
+            }
             engine.add_strategy(strategy).unwrap();
-            engine.run(None, None, None, false).unwrap();
+
+            let start = Some(UnixNanos::from_str("2024-01-01").unwrap());
+            let end = Some(UnixNanos::from_str("2026-01-01").unwrap());
+            engine.run(start, end, None, false).unwrap();
         }
         Environment::Sandbox => todo!(),
         Environment::Live => todo!(),
