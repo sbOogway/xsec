@@ -13,12 +13,7 @@ nautilus-backtest = { version = "0.61" }
 nautilus-live = { version = "0.61" }
 bon = "3.10.0"
 anyhow = "1.0.104"
-reqwest = { version = "0.13.4", default-features = false, features = ["json", "rustls", "query"] }
-tokio = { version = "1.53.1", features = ["fs", "macros", "rt-multi-thread", "sync", "time"] }
-parquet = { version = "=53.4.0", default-features = false, features = ["arrow", "snap", "lz4", "zstd", "brotli"] }
-arrow-array = "=53.4.0"
-arrow-schema = "=53.4.0"
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-chrono = { version = "0.4.45", features = ["serde"] }
+tokio = { version = "1.53.1", features = ["rt-multi-thread", "macros"] }
+chrono = "0.4.45"
+rmp-serde = "1"
 log = "0.4.34"

@@ -1,10 +1,12 @@
 use std::{fmt::Debug, str::FromStr, time::Duration};
 
-use nautilus_common::{actor::DataActor, enums::Environment, log_info, timer::TimeEvent};
+use nautilus_common::{actor::DataActor, enums::Environment, timer::TimeEvent};
 use nautilus_core::UnixNanos;
 use nautilus_model::{
-    enums::{AccountType, BookType, OmsType},
+    data::{BarSpecification, BarType, Data},
+    enums::{AccountType, AggregationSource, BookType, OmsType, PriceType},
     identifiers::{InstrumentId, StrategyId, Venue},
+    instruments::Instrument,
     types::Money,
 };
 use nautilus_trading::{Strategy, StrategyConfig, StrategyCore, nautilus_strategy};
@@ -64,10 +66,15 @@ impl DataActor for XSectionalMomentum {
 
     fn on_time_event(&mut self, event: &TimeEvent) -> anyhow::Result<()> {
         log::info!("hello from on_time_event {}", event);
-
         for symbol in &self.symbols {
-            // let _symbol = symbol.as_str();
-            let quote = self.cache().quote(symbol);
+            let spec = BarSpecification::new(
+                1,
+                nautilus_model::enums::BarAggregation::Day,
+                PriceType::Last,
+            );
+            let bar_type = BarType::new(*symbol, spec, AggregationSource::External);
+            let bar = self.cache().bar(&bar_type);
+            log::info!("{} -> {:?}", symbol, bar);
         }
         anyhow::Ok(())
     }
@@ -98,13 +105,19 @@ fn main() {
                 .iter()
                 .map(|b| InstrumentId::from(format!("{b}USDT-LINEAR.BYBIT").as_str()))
                 .collect();
-            let rt = tokio::runtime::Runtime::new().unwrap();
-            rt.block_on(data::ensure_data(&symbols)).unwrap();
 
+            let rt = tokio::runtime::Runtime::new().unwrap();
             for id in &symbols {
-                let bars = data::load_data(id).unwrap();
+                let (instruments, bars) = rt.block_on(data::fetch_linear_with_bars(*id)).unwrap();
+                for inst in instruments {
+                    if symbols.contains(&inst.id()) {
+                        engine.add_instrument(&inst).unwrap();
+                    }
+                }
                 log::info!("loaded {} bars for {}", bars.len(), id);
-                engine.add_data(bars, None, false, true).unwrap();
+                engine
+                    .add_data(bars.into_iter().map(Data::Bar).collect(), None, false, true)
+                    .unwrap();
             }
             engine.add_strategy(strategy).unwrap();
 
