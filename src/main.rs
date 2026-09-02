@@ -1,26 +1,24 @@
 use std::{
-    collections::{HashMap, VecDeque},
+    collections::HashMap,
     fmt::Debug,
     str::FromStr,
     time::Duration,
 };
-use nautilus_model::types::Currency;
 
 use anyhow::anyhow;
 use chrono::{DateTime, Datelike};
 use nautilus_common::{actor::DataActor, enums::Environment, timer::TimeEvent};
 use nautilus_core::UnixNanos;
 use nautilus_model::{
-    data::{Bar, BarSpecification, BarType, Data},
+    data::{Bar, Data},
     enums::{
-        AccountType, AggregationSource, BarAggregation, BookType, OmsType, OrderSide, PriceType,
+        AccountType, BarAggregation, BookType, OmsType, OrderSide,
     },
+    events::PositionOpened,
     identifiers::{InstrumentId, StrategyId, Venue},
     instruments::Instrument,
     types::{Money, Quantity},
-    
 };
-
 
 use nautilus_trading::{Strategy, StrategyConfig, StrategyCore, nautilus_strategy};
 
@@ -49,6 +47,8 @@ const LOOKBACK_MONTHS: u16 = 12;
 
 const PERCENTILE: &str = "0.1";
 
+const DOLLAR_POSITION_SIZE: f64 = 50.0;
+
 #[derive(bon::Builder)]
 pub struct XSectionalMomentum {
     #[builder(default = StrategyCore::new(StrategyConfig {
@@ -75,9 +75,14 @@ pub struct XSectionalMomentum {
 
     #[builder(default)]
     returns: HashMap<InstrumentId, Decimal>,
+
 }
 
-nautilus_strategy!(XSectionalMomentum, {});
+nautilus_strategy!(XSectionalMomentum, {
+    fn on_position_opened(&mut self, event: PositionOpened) {
+        log::info!("new position debug {:#?}", event);
+    }
+});
 
 impl Debug for XSectionalMomentum {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -130,11 +135,29 @@ impl DataActor for XSectionalMomentum {
         anyhow::Ok(())
     }
 
+    fn on_stop(&mut self) -> anyhow::Result<()> {
+        log::info!("XSectionalMomentum stopped");
+        anyhow::Ok(())
+    }
+
     fn on_time_event(&mut self, event: &TimeEvent) -> anyhow::Result<()> {
         let timestamp_integer = event.ts_event.as_u64() as i64;
         let current_month = DateTime::from_timestamp_nanos(timestamp_integer).month();
         if self.last_month == current_month {
             return anyhow::Ok(());
+        }
+
+        let open_positions = self.cache().positions_open(None, None, None, None, None);
+
+        for position in open_positions {
+            let holding_ns = 28_u64 * self.holding_months as u64 * 86_400 * 1_000_000_000;
+            let age_ns = event
+                .ts_event
+                .as_u64()
+                .saturating_sub(position.ts_opened.as_u64());
+            if age_ns > holding_ns {
+                let _ = self.close_position(&position, None, None, None, None, None, None);
+            }
         }
 
         log::info!("hello from on_time_event {}", event);
@@ -188,23 +211,73 @@ impl DataActor for XSectionalMomentum {
         log::info!("balance {:#?}", balances);
 
         for (instrument, _) in percentile_bottom {
-            let order = self.order().market(
-                **instrument,
-                OrderSide::Sell,
-                Quantity::from_str("5.00").unwrap(),
-                None,
-                None,
-                Some(true),
-                None,
-                None,
-                None,
-                None,
-            );
-            let _ = self.submit_order(order, None, None, None);
+            self.submit_notional_market(**instrument, OrderSide::Sell, DOLLAR_POSITION_SIZE);
+        }
+
+        for (instrument, _) in percentile_top {
+            self.submit_notional_market(**instrument, OrderSide::Buy, DOLLAR_POSITION_SIZE);
         }
 
         self.last_month = current_month;
         anyhow::Ok(())
+    }
+}
+
+impl XSectionalMomentum {
+    fn submit_notional_market(
+        &mut self,
+        instrument_id: InstrumentId,
+        side: OrderSide,
+        notional_usdt: f64,
+    ) {
+        let Some(cached) = self.cache().instrument(&instrument_id) else {
+            log::warn!("no instrument cached for {instrument_id}, skipping");
+            return;
+        };
+        let bt = bar_type(instrument_id, TIMEFRAME);
+        let Some(bar) = self
+            .cache()
+            .bar_at_index(&bt, 1)
+            .or_else(|| self.cache().bar(&bt))
+        else {
+            log::warn!("no bar cached for {instrument_id}, skipping");
+            return;
+        };
+        let close = bar.close.as_f64();
+        if !close.is_finite() || close <= 0.0 {
+            log::warn!("invalid close {close} for {instrument_id}, skipping");
+            return;
+        }
+        let precision = cached.size_precision();
+        let units = notional_usdt / close;
+        if !units.is_finite() || units <= 0.0 {
+            log::warn!("computed quantity {units} for {instrument_id}, skipping");
+            return;
+        }
+        let min_lot = 10f64.powi(-(precision as i32));
+        if units + f64::EPSILON < min_lot {
+            log::warn!(
+                "notional {notional_usdt} USDT rounds to 0 for {instrument_id} at precision {precision} (min lot ~{min_lot}); skipping"
+            );
+            return;
+        }
+        let order = self.order().market(
+            instrument_id,
+            side,
+            Quantity::new(units, precision),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        );
+        // log::info!("{}", order);
+        // self.orders.push(order.clone());
+        let _ = self.submit_order(order.clone(), None, None, None);
+
+        // Some(order)
     }
 }
 
@@ -261,7 +334,7 @@ fn main() {
                 common::enums::BybitProductType, config::BybitDataClientConfig,
                 factories::BybitDataClientFactory,
             };
-            use nautilus_common::factories::{ClientConfig, DataClientFactory};
+            use nautilus_common::factories::ClientConfig;
             use nautilus_model::identifiers::TraderId;
 
             let strategy = XSectionalMomentum::builder().build();
