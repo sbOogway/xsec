@@ -13,18 +13,19 @@ use nautilus_model::{
 const DATA_DIR: &str = "data";
 const STALE_AFTER_HOURS: i64 = 24;
 
-fn daily_bar_type(instrument_id: InstrumentId) -> BarType {
+pub fn bar_type(instrument_id: InstrumentId, aggregation: BarAggregation) -> BarType {
     BarType::new(
         instrument_id,
-        BarSpecification::new(1, BarAggregation::Day, PriceType::Last),
+        BarSpecification::new(1, aggregation, PriceType::Last),
         AggregationSource::External,
     )
 }
+// cons
 
 fn cache_path(instrument_id: &InstrumentId) -> PathBuf {
     let sym = instrument_id.symbol.as_str();
     let bare = sym.split_once('-').map(|(b, _)| b).unwrap_or(sym);
-    PathBuf::from(DATA_DIR).join(format!("{bare}_1d.msgpack"))
+    PathBuf::from(DATA_DIR).join(format!("{bare}_1M.msgpack"))
 }
 
 fn cache_is_fresh(bars: &[Bar]) -> bool {
@@ -35,15 +36,16 @@ fn cache_is_fresh(bars: &[Bar]) -> bool {
     age_hours <= STALE_AFTER_HOURS as u64
 }
 
-/// Fetch all Bybit linear instruments and the daily bar history for `instrument_id`.
+/// Fetch all Bybit linear instruments and the monthly bar history for `instrument_id`.
 /// Results are cached on disk in Nautilus msgpack; subsequent calls within
 /// `STALE_AFTER_HOURS` of the last bar skip the network.
 pub async fn fetch_linear_with_bars(
     instrument_id: InstrumentId,
+    aggregation: BarAggregation
 ) -> Result<(Vec<InstrumentAny>, Vec<Bar>)> {
     fs::create_dir_all(DATA_DIR).ok();
 
-    let bar_type = daily_bar_type(instrument_id);
+    let bar_type = bar_type(instrument_id, aggregation);
     let path = cache_path(&instrument_id);
     if let Ok(bytes) = fs::read(&path) {
         if let Ok(bars) = rmp_serde::from_slice::<Vec<Bar>>(&bytes) {
