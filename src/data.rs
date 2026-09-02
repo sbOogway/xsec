@@ -38,13 +38,28 @@ fn cache_is_fresh(bars: &[Bar]) -> bool {
     age_hours <= STALE_AFTER_HOURS as u64
 }
 
-/// Fetch all Bybit linear instruments and the monthly bar history for `instrument_id`.
+/// Fetch all Bybit linear instruments, once, and cache them on the client.
+/// Subsequent per-symbol calls reuse this seeded cache so we don't burn a
+/// full instruments request for every ticker.
+pub async fn fetch_linear_instruments() -> Result<Vec<InstrumentAny>> {
+    let client = BybitHttpClient::default();
+    let instruments = client
+        .request_instruments(BybitProductType::Linear, None, None)
+        .await
+        .context("bybit request_instruments")?;
+    client.cache_instruments(&instruments);
+    Ok(instruments)
+}
+
+/// Fetch the monthly bar history for `instrument_id`. Uses a shared client
+/// that has had instruments seeded by `fetch_linear_instruments`, so we
+/// don't refetch the instruments list per symbol.
 /// Results are cached on disk in Nautilus msgpack; subsequent calls within
 /// `STALE_AFTER_HOURS` of the last bar skip the network.
-pub async fn fetch_linear_with_bars(
+pub async fn fetch_bars_cached(
     instrument_id: InstrumentId,
     aggregation: BarAggregation,
-) -> Result<(Vec<InstrumentAny>, Vec<Bar>)> {
+) -> Result<Vec<Bar>> {
     fs::create_dir_all(DATA_DIR).ok();
 
     let bar_type = bar_type(instrument_id, aggregation);
@@ -53,25 +68,20 @@ pub async fn fetch_linear_with_bars(
         if let Ok(bars) = rmp_serde::from_slice::<Vec<Bar>>(&bytes) {
             if cache_is_fresh(&bars) {
                 println!("[data] cache hit: {instrument_id} ({} bars)", bars.len());
-                let instruments = BybitHttpClient::default()
-                    .request_instruments(BybitProductType::Linear, None, None)
-                    .await?;
-                return Ok((instruments, bars));
+                return Ok(bars);
             }
         }
     }
 
     println!("[data] fetching: {instrument_id}");
-    let client = BybitHttpClient::default();
-    let instruments = client
-        .request_instruments(BybitProductType::Linear, None, None)
-        .await
-        .context("bybit request_instruments")?;
-
+    let client = shared_client();
     let bars = client
         .request_bars(BybitProductType::Linear, bar_type, None, None, None, true)
         .await
         .context("bybit request_bars")?;
+
+    // Pace cold fetches to stay under Bybit's per-second rate caps.
+    tokio::time::sleep(std::time::Duration::from_millis(20)).await;
 
     let bytes = rmp_serde::to_vec_named(&bars)?;
     let tmp = path.with_extension("msgpack.tmp");
@@ -79,7 +89,20 @@ pub async fn fetch_linear_with_bars(
     fs::rename(&tmp, &path).with_context(|| format!("rename to {}", path.display()))?;
 
     println!("[data] cached {} bars for {instrument_id}", bars.len());
-    Ok((instruments, bars))
+    Ok(bars)
+}
+
+fn shared_client() -> BybitHttpClient {
+    use std::sync::OnceLock;
+    static CLIENT: OnceLock<BybitHttpClient> = OnceLock::new();
+    CLIENT.get_or_init(BybitHttpClient::default).clone()
+}
+
+/// Seed the shared bybit client with the instruments list from
+/// `fetch_linear_instruments`. Must be called once before the first
+/// `fetch_bars_cached` so `request_bars` can resolve symbols.
+pub fn seed_instruments(instruments: &[InstrumentAny]) {
+    shared_client().cache_instruments(instruments);
 }
 
 #[allow(dead_code)]

@@ -1,9 +1,4 @@
-use std::{
-    collections::HashMap,
-    fmt::Debug,
-    str::FromStr,
-    time::Duration,
-};
+use std::{collections::HashMap, fmt::Debug, str::FromStr, time::Duration};
 
 use anyhow::anyhow;
 use chrono::{DateTime, Datelike};
@@ -11,9 +6,7 @@ use nautilus_common::{actor::DataActor, enums::Environment, timer::TimeEvent};
 use nautilus_core::UnixNanos;
 use nautilus_model::{
     data::{Bar, Data},
-    enums::{
-        AccountType, BarAggregation, BookType, OmsType, OrderSide,
-    },
+    enums::{AccountType, BarAggregation, BookType, OmsType, OrderSide},
     events::PositionOpened,
     identifiers::{InstrumentId, StrategyId, Venue},
     instruments::Instrument,
@@ -34,20 +27,31 @@ use crate::data::{bar_type, structure::BoundedQueue};
 mod data;
 
 const ENVIRONMENT: Environment = Environment::Backtest;
-const BASES: [&str; 45] = [
-    "BTC", "ETH", "BNB", "XRP", "SOL", "TRX", "HYPE", "ZEC", "DOGE", "XMR", "LINK", "ADA", "XLM",
-    "BCH", "LTC", "UNI", "HBAR", "AVAX", "SUI", "CRO", "TAO", "NEAR", "OKB", "AAVE", "ASTER",
+const BASES: &[&str] = &[
+    "BTC", "ETH", "BNB", "XRP", "SOL", "TRX", "DOGE", "XMR", "LINK", "ADA", "XLM",
+    "BCH", "LTC", "UNI", "HBAR", "AVAX", "SUI", "CRO", "TAO", "NEAR", "OKB", "AAVE",
     "MNT", "ONDO", "ENA", "DOT", "ICP", "MORPHO", "WLD", "ETC", "OP", "POL", "ALGO", "QNT", "ATOM",
-    "KAS", "ARB", "RENDER", "FIL", "TRUMP", "CAKE", "CRV",
+    "KAS", "ARB", "RENDER", "FIL", "CAKE", "CRV", "INJ", "STX", "TIA", "VET", "JUP", 
+    "HYPE", "ASTER", "ZEC","CC", "GRAM" ,
+    "PYTH", "PUMPFUN", "1000PEPE", "EIGEN", "FLR", "IMX", "JST", "SEI", "XDC", "JST"
+    // "JST", "KITE", "FF", "GRAM", "LIT", "PENDLE", "LDO", "CFX", "XTZ", "JASMY", "TWT", "CVX",
+    // "ENS", "JTO", "WIF", "COMP", "STRK", "2Z", "KAIA", "IOTA", "ZBCN", "THETA", "AXS", "NEO",
+    // "CHZ", "EGLD", "APE", "AR", "MANA", "SAND", "BAT", "KSM", "DYDX", "GLM", "QTUM", "ZRX", "GMX",
+    // "ORCA", "KAITO", "COW", "SNX", "LPT", "NMR", "BR", "SUPER", "AIOZ", "ARC", "WAL", "ETHFI",
+    // "SSV",
 ];
 const TIMEFRAME: BarAggregation = BarAggregation::Month;
 
-const HOLDING_MONTHS: u16 = 3;
-const LOOKBACK_MONTHS: u16 = 12;
+const HOLDING_MONTHS: u16 = 1;
+const LOOKBACK_MONTHS: u16 = 3;
 
 const PERCENTILE: &str = "0.1";
 
 const DOLLAR_POSITION_SIZE: f64 = 50.0;
+const STARTING_BALANCE: &str = "1_000 USDT";
+
+const DATE_START: &str = "2025-01-01";
+const DATE_END: &str = "2026-08-01";
 
 #[derive(bon::Builder)]
 pub struct XSectionalMomentum {
@@ -75,7 +79,6 @@ pub struct XSectionalMomentum {
 
     #[builder(default)]
     returns: HashMap<InstrumentId, Decimal>,
-
 }
 
 nautilus_strategy!(XSectionalMomentum, {
@@ -96,6 +99,8 @@ impl Debug for XSectionalMomentum {
 
 impl DataActor for XSectionalMomentum {
     fn on_start(&mut self) -> anyhow::Result<()> {
+        log::info!("{:#?}", self);
+
         self.clock().set_timer(
             "DAILY",
             Duration::from_hours(24),
@@ -150,7 +155,7 @@ impl DataActor for XSectionalMomentum {
         let open_positions = self.cache().positions_open(None, None, None, None, None);
 
         for position in open_positions {
-            let holding_ns = 28_u64 * self.holding_months as u64 * 86_400 * 1_000_000_000;
+            let holding_ns = 27_u64 * self.holding_months as u64 * 86_400 * 1_000_000_000;
             let age_ns = event
                 .ts_event
                 .as_u64()
@@ -296,7 +301,7 @@ fn main() {
                         .oms_type(OmsType::Hedging)
                         .account_type(AccountType::Margin)
                         .book_type(BookType::L1_MBP)
-                        .starting_balances(vec![Money::from("1_000 USDT")])
+                        .starting_balances(vec![Money::from(STARTING_BALANCE)])
                         .build()
                         .unwrap(),
                 )
@@ -308,15 +313,19 @@ fn main() {
                 .collect();
 
             let rt = tokio::runtime::Runtime::new().unwrap();
-            for id in &symbols {
-                let (instruments, bars) = rt
-                    .block_on(data::fetch_linear_with_bars(*id, TIMEFRAME))
-                    .unwrap();
-                for inst in instruments {
-                    if symbols.contains(&inst.id()) {
-                        engine.add_instrument(&inst).unwrap();
-                    }
+            let instruments = rt
+                .block_on(data::fetch_linear_instruments())
+                .unwrap();
+            data::seed_instruments(&instruments);
+            for inst in &instruments {
+                if symbols.contains(&inst.id()) {
+                    engine.add_instrument(inst).unwrap();
                 }
+            }
+            for id in &symbols {
+                let bars = rt
+                    .block_on(data::fetch_bars_cached(*id, TIMEFRAME))
+                    .unwrap();
                 log::info!("loaded {} bars for {}", bars.len(), id);
                 engine
                     .add_data(bars.into_iter().map(Data::Bar).collect(), None, false, true)
@@ -324,8 +333,8 @@ fn main() {
             }
             engine.add_strategy(strategy).unwrap();
 
-            let start = Some(UnixNanos::from_str("2020-01-01").unwrap());
-            let end = Some(UnixNanos::from_str("2026-01-01").unwrap());
+            let start = Some(UnixNanos::from_str(DATE_START).unwrap());
+            let end = Some(UnixNanos::from_str(DATE_END).unwrap());
             engine.run(start, end, None, false).unwrap();
         }
         Environment::Sandbox => todo!(),
