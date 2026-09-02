@@ -29,7 +29,9 @@ fn cache_path(instrument_id: &InstrumentId) -> PathBuf {
 }
 
 fn cache_is_fresh(bars: &[Bar]) -> bool {
-    let Some(last) = bars.last() else { return false };
+    let Some(last) = bars.last() else {
+        return false;
+    };
     let last_ms = last.ts_event.as_u64() / 1_000_000;
     let now_ms = Utc::now().timestamp_millis() as u64;
     let age_hours = now_ms.saturating_sub(last_ms) / 3_600_000;
@@ -41,7 +43,7 @@ fn cache_is_fresh(bars: &[Bar]) -> bool {
 /// `STALE_AFTER_HOURS` of the last bar skip the network.
 pub async fn fetch_linear_with_bars(
     instrument_id: InstrumentId,
-    aggregation: BarAggregation
+    aggregation: BarAggregation,
 ) -> Result<(Vec<InstrumentAny>, Vec<Bar>)> {
     fs::create_dir_all(DATA_DIR).ok();
 
@@ -85,4 +87,50 @@ pub fn parse_date(s: &str) -> Result<DateTime<Utc>> {
     DateTime::parse_from_rfc3339(s)
         .map(|d| d.with_timezone(&Utc))
         .with_context(|| format!("parse date {s}"))
+}
+
+pub mod structure {
+    use std::collections::VecDeque;
+
+    // #[derive(Clone)]
+    pub struct BoundedQueue<T> {
+        pub inner: VecDeque<T>,
+        capacity: usize,
+    }
+
+    impl<T> BoundedQueue<T> {
+        pub fn new(capacity: usize) -> Self {
+            Self {
+                inner: VecDeque::with_capacity(capacity),
+                capacity,
+            }
+        }
+
+        // pub fn get(self) -> VecDeque<T> {
+        //     // self.inner.clone()
+        // }
+
+        // VARIANT A: Reject the item if full
+        pub fn try_push_back(&mut self, item: T) -> Result<(), T> {
+            if self.inner.len() >= self.capacity {
+                return Err(item); // Return item back to caller
+            }
+            self.inner.push_back(item);
+            Ok(())
+        }
+
+        // VARIANT B: Evict the oldest item (ring buffer behavior)
+        pub fn push_back_overwrite(&mut self, item: T) -> Option<T> {
+            let mut evicted = None;
+            if self.inner.len() >= self.capacity {
+                evicted = self.inner.pop_front(); // Evict oldest
+            }
+            self.inner.push_back(item);
+            evicted
+        }
+
+        pub fn pop_front(&mut self) -> Option<T> {
+            self.inner.pop_front()
+        }
+    }
 }

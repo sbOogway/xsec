@@ -1,4 +1,10 @@
-use std::{collections::{HashMap, VecDeque}, fmt::Debug, str::FromStr, time::Duration};
+use std::{
+    collections::{HashMap, VecDeque},
+    fmt::Debug,
+    str::FromStr,
+    time::Duration,
+};
+use nautilus_model::types::Currency;
 
 use anyhow::anyhow;
 use chrono::{DateTime, Datelike};
@@ -6,11 +12,16 @@ use nautilus_common::{actor::DataActor, enums::Environment, timer::TimeEvent};
 use nautilus_core::UnixNanos;
 use nautilus_model::{
     data::{Bar, BarSpecification, BarType, Data},
-    enums::{AccountType, AggregationSource, BarAggregation, BookType, OmsType, PriceType},
+    enums::{
+        AccountType, AggregationSource, BarAggregation, BookType, OmsType, OrderSide, PriceType,
+    },
     identifiers::{InstrumentId, StrategyId, Venue},
     instruments::Instrument,
-    types::Money,
+    types::{Money, Quantity},
+    
 };
+
+
 use nautilus_trading::{Strategy, StrategyConfig, StrategyCore, nautilus_strategy};
 
 use nautilus_backtest::{
@@ -20,20 +31,23 @@ use nautilus_backtest::{
 use nautilus_live::node::LiveNode;
 use rust_decimal::Decimal;
 
-use crate::data::bar_type;
+use crate::data::{bar_type, structure::BoundedQueue};
 
 mod data;
 
 const ENVIRONMENT: Environment = Environment::Backtest;
-const BASES: [&str; 2] = ["BTC", "ETH"];
+const BASES: [&str; 45] = [
+    "BTC", "ETH", "BNB", "XRP", "SOL", "TRX", "HYPE", "ZEC", "DOGE", "XMR", "LINK", "ADA", "XLM",
+    "BCH", "LTC", "UNI", "HBAR", "AVAX", "SUI", "CRO", "TAO", "NEAR", "OKB", "AAVE", "ASTER",
+    "MNT", "ONDO", "ENA", "DOT", "ICP", "MORPHO", "WLD", "ETC", "OP", "POL", "ALGO", "QNT", "ATOM",
+    "KAS", "ARB", "RENDER", "FIL", "TRUMP", "CAKE", "CRV",
+];
 const TIMEFRAME: BarAggregation = BarAggregation::Month;
-// fn monthly_bar_type(symbol: InstrumentId) -> BarType {
-//     BarType::new(
-//         symbol,
-//         BarSpecification::new(1, BarAggregation::Month, PriceType::Last),
-//         AggregationSource::External,
-//     )
-// }
+
+const HOLDING_MONTHS: u16 = 3;
+const LOOKBACK_MONTHS: u16 = 12;
+
+const PERCENTILE: &str = "0.1";
 
 #[derive(bon::Builder)]
 pub struct XSectionalMomentum {
@@ -47,36 +61,21 @@ pub struct XSectionalMomentum {
     #[builder(default = BASES.into_iter().map(|base|{format!("{}USDT-LINEAR.BYBIT", base)}).map(InstrumentId::from).collect())]
     symbols: Vec<InstrumentId>,
 
-    #[builder(default = 12)]
-    months: u16,
+    #[builder(default = HOLDING_MONTHS)]
+    holding_months: u16,
 
-    #[builder(default = 12)]
-    warmup_bars: u32,
+    #[builder(default = LOOKBACK_MONTHS)]
+    lookback_months: u16,
 
     #[builder(default = 0)]
     last_month: u32,
 
     #[builder(default)]
-    returns: HashMap<InstrumentId, VecDeque<Decimal>>
-    // #[builder(default)]
-    // last_seen_ts: HashMap<InstrumentId, UnixNanos>,
+    prices: HashMap<InstrumentId, BoundedQueue<Decimal>>,
+
+    #[builder(default)]
+    returns: HashMap<InstrumentId, Decimal>,
 }
-
-// impl XSectionalMomentum {
-//     fn remember_ts(&mut self, id: InstrumentId, ts: UnixNanos) {
-//         let entry = self.last_seen_ts.entry(id).or_insert(UnixNanos::default());
-//         if ts > *entry {
-//             *entry = ts;
-//         }
-//     }
-
-//     fn is_fresh(&self, id: &InstrumentId, ts: UnixNanos) -> bool {
-//         match self.last_seen_ts.get(id) {
-//             Some(last) => ts > *last,
-//             None => true,
-//         }
-//     }
-// }
 
 nautilus_strategy!(XSectionalMomentum, {});
 
@@ -85,7 +84,7 @@ impl Debug for XSectionalMomentum {
         f.debug_struct("XSectionalMomentum")
             .field("core", &self.core)
             .field("symbols", &self.symbols)
-            .field("warmup_bars", &self.warmup_bars)
+            .field("warmup_bars", &self.lookback_months)
             .finish()
     }
 }
@@ -102,7 +101,7 @@ impl DataActor for XSectionalMomentum {
             None,
         )?;
 
-        let warmup = std::num::NonZeroUsize::new(self.warmup_bars as usize)
+        let warmup = std::num::NonZeroUsize::new(self.lookback_months as usize)
             .ok_or_else(|| anyhow!("warmup_bars must be > 0"))?;
 
         let symbols = self.symbols.clone();
@@ -114,37 +113,20 @@ impl DataActor for XSectionalMomentum {
             self.request_bars(bar_type, None, None, Some(warmup), None, None)?;
             self.subscribe_bars(bar_type, None, None);
 
-            self.returns.insert(symbol, VecDeque::with_capacity(self.months.into()));
+            self.prices
+                .insert(symbol, BoundedQueue::new(self.lookback_months.into()));
         }
 
         anyhow::Ok(())
     }
 
-    // fn on_historical_bars(&mut self, bars: &[Bar]) -> anyhow::Result<()> {
-    //     log::info!("received {} historical bars (live warmup)", bars.len());
-    //     // for bar in bars {
-    //     //     self.remember_ts(bar.instrument_id(), bar.ts_event);
-    //     // }
-    //     anyhow::Ok(())
-    // }
-
     fn on_bar(&mut self, bar: &Bar) -> anyhow::Result<()> {
-        let timestamp_integer = bar.ts_event.as_u64() as i64;
-        let current_month = DateTime::from_timestamp_nanos(timestamp_integer).month();
-        if self.last_month == current_month {
-            return anyhow::Ok(());
-        }
         let id = bar.instrument_id();
-        // if !self.is_fresh(&id, bar.ts_event) {
-        //     return anyhow::Ok(());
-        // }
-        // self.remember_ts(id, bar.ts_event);
-        log::info!("bar {} @ {}", id, bar.ts_event);
-        // self.returns.insert(bar.instrument_id(), );
-        if let Some(symbol_returns) = self.returns.get_mut(&id) {
-            symbol_returns.push_back(bar.close.as_decimal());
+
+        log::debug!("bar {} @ {}", id, bar.ts_event);
+        if let Some(symbol_returns) = self.prices.get_mut(&id) {
+            symbol_returns.push_back_overwrite(bar.close.as_decimal());
         }
-        self.last_month = current_month;
         anyhow::Ok(())
     }
 
@@ -158,9 +140,67 @@ impl DataActor for XSectionalMomentum {
         log::info!("hello from on_time_event {}", event);
         for symbol in &self.symbols {
             let bar_type = bar_type(*symbol, TIMEFRAME);
-            log::info!("{} -> {:?}", symbol, self.cache().bar(&bar_type));
-            // let price = self.cache().price(symbol, PriceType::Mark).unwrap();
-            // log::info!("{}", price);
+            log::debug!("{} -> {:?}", symbol, self.cache().bar(&bar_type));
+            log::debug!(
+                "{} -> {:#?}",
+                symbol,
+                self.prices.get(symbol).unwrap().inner
+            );
+
+            let price_lookback_months = self.prices.get(symbol).unwrap().inner.get(0);
+            let price_current = self
+                .prices
+                .get(symbol)
+                .unwrap()
+                .inner
+                .get((self.lookback_months - 1).into());
+            if price_current == None {
+                self.returns.remove(symbol);
+                continue;
+            }
+
+            let returns_lookback = (price_current.unwrap() - price_lookback_months.unwrap())
+                / price_lookback_months.unwrap();
+
+            log::debug!("{} return lookback -> {}", symbol, returns_lookback);
+            self.returns.insert(*symbol, returns_lookback);
+        }
+
+        let binding = self.returns.clone();
+        let mut sorted_returns: Vec<(&InstrumentId, &Decimal)> = binding.iter().collect();
+        sorted_returns.sort_by_key(|&(_, v)| v);
+
+        let percentile_size = (Decimal::from_str(PERCENTILE).unwrap()
+            * Decimal::from(sorted_returns.len()))
+        .as_i128() as usize;
+
+        let percentile_bottom = &sorted_returns[..percentile_size];
+        let percentile_top = &sorted_returns[sorted_returns.len() - percentile_size..];
+
+        log::info!("returns sorted {:#?}", sorted_returns);
+        log::info!("returns bottom {:#?}", percentile_bottom);
+        log::info!("returns top {:#?}", percentile_top);
+
+        let account = self.cache().account_for_venue(&Venue::new("BYBIT"));
+        let binding = account.unwrap();
+        let balances = binding.balances();
+
+        log::info!("balance {:#?}", balances);
+
+        for (instrument, _) in percentile_bottom {
+            let order = self.order().market(
+                **instrument,
+                OrderSide::Sell,
+                Quantity::from_str("5.00").unwrap(),
+                None,
+                None,
+                Some(true),
+                None,
+                None,
+                None,
+                None,
+            );
+            let _ = self.submit_order(order, None, None, None);
         }
 
         self.last_month = current_month;
@@ -183,7 +223,7 @@ fn main() {
                         .oms_type(OmsType::Hedging)
                         .account_type(AccountType::Margin)
                         .book_type(BookType::L1_MBP)
-                        .starting_balances(vec![Money::from("1_000_000 USD")])
+                        .starting_balances(vec![Money::from("1_000 USDT")])
                         .build()
                         .unwrap(),
                 )
@@ -196,7 +236,9 @@ fn main() {
 
             let rt = tokio::runtime::Runtime::new().unwrap();
             for id in &symbols {
-                let (instruments, bars) = rt.block_on(data::fetch_linear_with_bars(*id, TIMEFRAME)).unwrap();
+                let (instruments, bars) = rt
+                    .block_on(data::fetch_linear_with_bars(*id, TIMEFRAME))
+                    .unwrap();
                 for inst in instruments {
                     if symbols.contains(&inst.id()) {
                         engine.add_instrument(&inst).unwrap();
