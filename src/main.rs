@@ -21,6 +21,7 @@ use nautilus_backtest::{
 };
 use nautilus_live::node::LiveNode;
 use rust_decimal::Decimal;
+use uuid::Uuid;
 
 use crate::data::{bar_type, structure::BoundedQueue};
 
@@ -79,6 +80,9 @@ pub struct XSectionalMomentum {
 
     #[builder(default)]
     returns: HashMap<InstrumentId, Decimal>,
+
+    #[builder(default = String::new())]
+    run_id: String,
 }
 
 nautilus_strategy!(XSectionalMomentum, {
@@ -93,12 +97,14 @@ impl Debug for XSectionalMomentum {
             .field("core", &self.core)
             .field("symbols", &self.symbols)
             .field("warmup_bars", &self.lookback_months)
+            .field("run_id", &self.run_id)
             .finish()
     }
 }
 
 impl DataActor for XSectionalMomentum {
     fn on_start(&mut self) -> anyhow::Result<()> {
+        log::info!("run_id={}", self.run_id);
         log::info!("{:#?}", self);
 
         self.clock().set_timer(
@@ -289,10 +295,13 @@ impl XSectionalMomentum {
 fn main() {
     nautilus_common::logging::ensure_logging_initialized();
 
+    let run_id = Uuid::now_v7().to_string();
+    println!("run_id={run_id}");
+
     match ENVIRONMENT {
         Environment::Backtest => {
             let mut engine = BacktestEngine::new(BacktestEngineConfig::default()).unwrap();
-            let strategy = XSectionalMomentum::builder().build();
+            let strategy = XSectionalMomentum::builder().run_id(run_id).build();
 
             engine
                 .add_venue(
@@ -346,7 +355,7 @@ fn main() {
             use nautilus_common::factories::ClientConfig;
             use nautilus_model::identifiers::TraderId;
 
-            let strategy = XSectionalMomentum::builder().build();
+            let strategy = XSectionalMomentum::builder().run_id(run_id).build();
 
             let config = BybitDataClientConfig {
                 product_types: vec![BybitProductType::Linear],
