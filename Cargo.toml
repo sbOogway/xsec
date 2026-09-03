@@ -19,3 +19,6 @@ rmp-serde = "1"
 log = "0.4.34"
 rust_decimal = "1.43.0"
 uuid = { version = "1.26", features = ["v7"] }
+
+[dev-dependencies]
+tempfile = "3"
