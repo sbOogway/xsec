@@ -35,7 +35,7 @@ def write_run(runs: Path, uuid: str, *, months: int = 8, empty_portfolio: bool =
     legs = run_dir / "legs.csv"
 
     legs.write_text(
-        "run_id,month,instrument_id,side,entry_bar_open,exit_bar_close,per_leg_return,notional_usdt\n"
+        "run_id,month,instrument_id,side,entry_price,exit_price,per_leg_return,notional_usdt\n"
         f"{uuid},2025-01,BTCUSDT-LINEAR.BYBIT,long,100,110,0.100000,50\n"
     )
 

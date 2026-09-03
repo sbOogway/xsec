@@ -9,6 +9,9 @@ dependencies = [
     "numpy==1.26.4",
     # quantstats 0.0.62 imports IPython at module load but doesn't declare it.
     "ipython==8.31.0",
+    # legs.py renders its charts directly; quantstats pulls matplotlib in too,
+    # but pin it here so the per-leg report doesn't ride on a transitive dep.
+    "matplotlib==3.11.1",
 ]
 
 [dependency-groups]

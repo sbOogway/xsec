@@ -6,7 +6,7 @@
 # Everything for a run is keyed by $(UUID):
 #   logs/<UUID>/logs.log
 #   runs/<UUID>/{config,legs,portfolio,fills}.csv
-#   runs/<UUID>/tearsheet.html
+#   runs/<UUID>/{tearsheet,legs}.html
 
 SHELL := bash
 .SHELLFLAGS := -o pipefail -c
@@ -26,6 +26,7 @@ backtest:
 	@mkdir -p logs/$(UUID)
 	cargo run --bin xsectional-rs -- --uuid "$(UUID)" 2>&1 | tee logs/$(UUID)/logs.log
 
-## Render runs/<UUID>/tearsheet.html from the captured CSVs.
+## Render runs/<UUID>/{tearsheet,legs}.html from the captured CSVs.
 report:
 	uv run --project analysis analysis/tearsheet.py --uuid "$(UUID)"
+	uv run --project analysis analysis/legs.py --uuid "$(UUID)"
