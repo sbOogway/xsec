@@ -1,0 +1,20 @@
+[project]
+name = "xsecmom-analysis"
+version = "0.1.0"
+description = "QuantStats tearsheet CLI for the cross-sectional momentum backtest"
+requires-python = ">=3.11,<3.13"
+dependencies = [
+    "quantstats==0.0.62",
+    "pandas==2.2.3",
+    "numpy==1.26.4",
+    # quantstats 0.0.62 imports IPython at module load but doesn't declare it.
+    "ipython==8.31.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest==8.3.4",
+]
+
+[tool.uv]
+package = false

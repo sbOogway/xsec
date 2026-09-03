@@ -3,3 +3,8 @@
 data/
 logs
 runs/
+
+# Python analysis env
+analysis/.venv/
+__pycache__/
+.pytest_cache/
