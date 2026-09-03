@@ -10,7 +10,6 @@
 use std::collections::HashMap;
 
 use rust_decimal::Decimal;
-use rust_decimal::prelude::FromPrimitive;
 use tempfile::tempdir;
 
 use nautilus_model::{enums::OrderSide, identifiers::InstrumentId};
@@ -133,7 +132,11 @@ fn capture_writes_the_contract() {
         assert_eq!(&row[6], "0.100000", "both legs designed to return +10%");
     }
 
-    // --- portfolio arithmetic: net_return == gross_return - fees/equity_start ---
+    // --- portfolio arithmetic: account-level returns off month-start equity ---
+    // Each month: two legs at +10% on 50 USDT notional => 10 USDT leg PnL,
+    // against 1000 USDT opening equity => gross_return == 0.01.
+    // net_return == gross_return - fee_paid / equity_start.
+    let expected_gross = (Decimal::from(10) / equity).round_dp(6);
     for row in &portfolio.rows {
         assert_eq!(row.len(), 10);
         assert_eq!(&row[2], "1", "n_long");
@@ -141,9 +144,9 @@ fn capture_writes_the_contract() {
         let gross: Decimal = row[4].parse().unwrap();
         let fee: Decimal = row[5].parse().unwrap();
         let net: Decimal = row[6].parse().unwrap();
+        assert_eq!(gross, expected_gross, "gross_return = leg PnL / equity_start");
         let expected_net = (gross - fee / equity).round_dp(6);
         assert_eq!(net, expected_net, "net_return identity for month {}", row[1]);
-        assert_eq!(gross, Decimal::from_f64(0.1).unwrap().round_dp(6));
         assert_eq!(&row[8], "2", "n_fills");
         assert!(row[9].ends_with("/fills.csv"), "fills_ref: {}", row[9]);
     }

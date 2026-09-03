@@ -44,12 +44,19 @@ is the last completed monthly bar close before the entry rebalance and
 `exit_price` is that instrument's close one rebalance later. This is **price
 return only** — no funding-rate carry on the perpetual leg (a future feature).
 
-`portfolio.net_return` is `gross_return - fee_paid_usdt / equity_start_of_month`,
-where `gross_return` is the notional-weighted mean of the month's per-leg
-returns. It will not tie out exactly against `equity_end_of_month_usdt` deltas:
-the leg returns are bar math, while the equity series comes from Nautilus'
-simulated-margin account model. Treat `net_return` as the strategy signal and
-the equity column as the accounting cross-check.
+`portfolio.gross_return` is an **account-level** monthly return: the month's
+summed leg PnL — each leg's close-to-close return times its USDT notional —
+divided by the month's *opening* equity. `portfolio.net_return` is
+`gross_return - fee_paid_usdt / equity_start_of_month`. Because the divisor is
+equity (not deployed notional), compounding the `net_return` series tracks the
+`equity_end_of_month_usdt` curve rather than running ~3× ahead of it.
+
+It still won't tie out *exactly* against `equity_end_of_month_usdt` deltas — the
+leg returns are close-to-close bar math while the equity series comes from
+Nautilus' simulated-margin account model (fill prices, mark timing, and funding
+all differ) — but the two are now the same order of magnitude. Treat
+`net_return` as the strategy signal and the equity column as the accounting
+cross-check.
 
 ## Tests
 

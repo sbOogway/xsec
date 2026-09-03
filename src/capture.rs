@@ -11,6 +11,12 @@
 //! The portfolio file is the source of truth for the tearsheet's headline
 //! return series; the legs and fills files are substrate for future
 //! per-leg / per-trade diagnostics.
+//!
+//! `portfolio.gross_return` / `net_return` are **account-level** monthly
+//! returns: the month's summed leg PnL (in USDT) divided by the month's opening
+//! equity, so compounding the series tracks `equity_end_of_month_usdt`. They
+//! are *not* the mean per-leg return — that would ignore how much of the
+//! account is actually deployed.
 
 use std::{
     collections::{BTreeMap, HashMap},
@@ -258,8 +264,9 @@ impl RunCapture {
 
         let mut n_long = 0u32;
         let mut n_short = 0u32;
-        let mut weighted_return = Decimal::ZERO;
-        let mut total_notional = Decimal::ZERO;
+        // Summed leg PnL in USDT: each leg's signed close-to-close return times
+        // its notional. This is a currency amount, not a fraction.
+        let mut leg_pnl_usdt = Decimal::ZERO;
 
         for leg in &accrual.legs {
             let Some(exit_price) = latest_close.get(&leg.instrument).copied() else {
@@ -278,8 +285,7 @@ impl RunCapture {
                 _ => n_long += 1,
             }
             let notional = Decimal::try_from(leg.notional_usdt).unwrap_or(Decimal::ZERO);
-            weighted_return += signed * notional;
-            total_notional += notional;
+            leg_pnl_usdt += signed * notional;
 
             let _ = writeln!(
                 self.legs,
@@ -296,16 +302,20 @@ impl RunCapture {
         }
         let _ = self.legs.flush();
 
-        let gross_return = if total_notional.is_zero() {
-            Decimal::ZERO
-        } else {
-            weighted_return / total_notional
-        };
+        // Both `gross_return` and the fee drag are expressed as a fraction of
+        // the month's *opening* equity, so the series compounds as an
+        // account-level return that lines up with `equity_end_of_month_usdt`
+        // (modulo the bar-math vs simulated-account differences the README
+        // spells out). Dividing by notional instead would overstate the return
+        // by roughly equity / notional_deployed.
         let equity_start = accrual.equity_start.unwrap_or(equity_end);
-        let fee_drag = if equity_start.is_zero() {
-            Decimal::ZERO
+        let (gross_return, fee_drag) = if equity_start.is_zero() {
+            (Decimal::ZERO, Decimal::ZERO)
         } else {
-            accrual.fee_paid / equity_start
+            (
+                leg_pnl_usdt / equity_start,
+                accrual.fee_paid / equity_start,
+            )
         };
         let net_return = gross_return - fee_drag;
 
