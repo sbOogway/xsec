@@ -135,10 +135,11 @@ impl DataActor for XSectionalMomentum {
         log::info!("{:#?}", self);
 
         if self.holding_months != 1 {
-            log::warn!(
-                "holding_months={} but this build only supports 1 (close-all-then-reopen each rebalance)",
+            return Err(anyhow!(
+                "holding_months={} is not supported: the rebalance path assumes a one-month hold. \
+                 Revisit the age-based close in on_time_event before changing this.",
                 self.holding_months
-            );
+            ));
         }
 
         self.capture = Some(RunCapture::open(&RunConfig {
@@ -211,13 +212,21 @@ impl DataActor for XSectionalMomentum {
             return anyhow::Ok(());
         }
 
-        // Close-all-then-reopen: every rebalance liquidates the whole book, then
-        // rebuilds it at fresh target notionals off the current equity. The
-        // holding period is therefore exactly one rebalance (see the
-        // `holding_months != 1` warning in `on_start`).
+        // Close the book, then reopen it below at fresh target notionals off the
+        // current equity. The age gate keeps this general: with `holding_months`
+        // pinned to 1 (enforced in `on_start`) every position is >27 days old at
+        // the next rebalance, so the whole book turns over; a future multi-month
+        // hold would keep younger tranches open here.
         let open_positions = self.cache().positions_open(None, None, None, None, None);
         for position in open_positions {
-            let _ = self.close_position(&position, None, None, None, None, None, None);
+            let holding_ns = 27_u64 * self.holding_months as u64 * 86_400 * 1_000_000_000;
+            let age_ns = event
+                .ts_event
+                .as_u64()
+                .saturating_sub(position.ts_opened.as_u64());
+            if age_ns > holding_ns {
+                let _ = self.close_position(&position, None, None, None, None, None, None);
+            }
         }
 
         log::info!("hello from on_time_event {}", event);
