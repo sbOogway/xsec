@@ -166,7 +166,12 @@ impl DataActor for XSectionalMomentum {
             None,
         )?;
 
-        let warmup = std::num::NonZeroUsize::new(self.lookback_months as usize)
+        // A J-month formation return needs J+1 price points (P_{t-J} .. P_t
+        // spans J monthly gaps), so both the warmup fetch and the price queue
+        // capacity are lookback_months + 1, not lookback_months. See
+        // https://github.com/sbOogway/xsecmom/issues/9.
+        let formation_window = self.lookback_months as usize + 1;
+        let warmup = std::num::NonZeroUsize::new(formation_window)
             .ok_or_else(|| anyhow!("warmup_bars must be > 0"))?;
 
         let symbols = self.symbols.clone();
@@ -178,8 +183,7 @@ impl DataActor for XSectionalMomentum {
             self.request_bars(bar_type, None, None, Some(warmup), None, None)?;
             self.subscribe_bars(bar_type, None, None);
 
-            self.prices
-                .insert(symbol, BoundedQueue::new(self.lookback_months.into()));
+            self.prices.insert(symbol, BoundedQueue::new(formation_window));
         }
 
         anyhow::Ok(())
@@ -239,13 +243,16 @@ impl DataActor for XSectionalMomentum {
                 self.prices.get(symbol).unwrap().inner
             );
 
+            // Queue capacity is lookback_months + 1 (see on_start), so index 0
+            // is the price from lookback_months ago and index lookback_months
+            // is the newest (current) price — a true J-month return.
             let price_lookback_months = self.prices.get(symbol).unwrap().inner.get(0);
             let price_current = self
                 .prices
                 .get(symbol)
                 .unwrap()
                 .inner
-                .get((self.lookback_months - 1).into());
+                .get(self.lookback_months.into());
             if price_current == None {
                 self.returns.remove(symbol);
                 continue;
