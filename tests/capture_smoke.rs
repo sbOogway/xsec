@@ -95,10 +95,11 @@ fn capture_writes_the_contract() {
     capture.finish(&exits, equity);
     drop(capture);
 
-    let legs = read_csv(dir.path().join(format!("{RUN_ID}.legs.csv")));
-    let portfolio = read_csv(dir.path().join(format!("{RUN_ID}.portfolio.csv")));
-    let fills = read_csv(dir.path().join(format!("{RUN_ID}.fills.csv")));
-    let config = read_csv(dir.path().join(format!("{RUN_ID}.config.csv")));
+    let run_dir = dir.path().join(RUN_ID);
+    let legs = read_csv(run_dir.join("legs.csv"));
+    let portfolio = read_csv(run_dir.join("portfolio.csv"));
+    let fills = read_csv(run_dir.join("fills.csv"));
+    let config = read_csv(run_dir.join("config.csv"));
 
     // --- headers are the contract ---
     assert_eq!(legs.header, LEGS_HEADER);
@@ -144,7 +145,7 @@ fn capture_writes_the_contract() {
         assert_eq!(net, expected_net, "net_return identity for month {}", row[1]);
         assert_eq!(gross, Decimal::from_f64(0.1).unwrap().round_dp(6));
         assert_eq!(&row[8], "2", "n_fills");
-        assert!(row[9].ends_with(".fills.csv"), "fills_ref: {}", row[9]);
+        assert!(row[9].ends_with("/fills.csv"), "fills_ref: {}", row[9]);
     }
 
     // n_fills in portfolio matches fills.csv rows for that month

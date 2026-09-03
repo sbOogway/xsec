@@ -4,9 +4,9 @@ Usage:
     uv run analysis/tearsheet.py --uuid <RUN_ID>
     uv run analysis/tearsheet.py --latest
 
-Reads ``runs/<RUN_ID>.portfolio.csv`` (the headline return series) and
-``runs/<RUN_ID>.legs.csv`` (verified non-empty only), and writes
-``runs/<RUN_ID>.tearsheet.html`` — a single self-contained file.
+Reads ``runs/<RUN_ID>/portfolio.csv`` (the headline return series) and
+``runs/<RUN_ID>/legs.csv`` (verified non-empty only), and writes
+``runs/<RUN_ID>/tearsheet.html`` — a single self-contained file.
 
 The Rust backtest binary writes those CSVs; the two languages share nothing but
 the ``runs/`` directory. See ``analysis/README.md``.
@@ -28,16 +28,16 @@ def _fail(message: str) -> "NoReturn":  # type: ignore[name-defined]
 
 
 def available_uuids() -> list[str]:
-    """Run ids that have a legs CSV under ``runs/``, newest first."""
-    legs = sorted(RUNS_DIR.glob("*.legs.csv"), key=lambda p: p.stat().st_mtime, reverse=True)
-    return [p.name[: -len(".legs.csv")] for p in legs]
+    """Run ids that have a legs CSV under ``runs/<uuid>/``, newest first."""
+    legs = sorted(RUNS_DIR.glob("*/legs.csv"), key=lambda p: p.stat().st_mtime, reverse=True)
+    return [p.parent.name for p in legs]
 
 
 def resolve_uuid(args: argparse.Namespace) -> str:
     if args.latest:
         uuids = available_uuids()
         if not uuids:
-            _fail(f"no runs found under {RUNS_DIR} (looked for *.legs.csv)")
+            _fail(f"no runs found under {RUNS_DIR} (looked for */legs.csv)")
         return uuids[0]
     return args.uuid
 
@@ -46,16 +46,16 @@ def load_returns(uuid: str):
     """Build the monthly net-return series QuantStats consumes."""
     import pandas as pd
 
-    portfolio_path = RUNS_DIR / f"{uuid}.portfolio.csv"
-    legs_path = RUNS_DIR / f"{uuid}.legs.csv"
+    portfolio_path = RUNS_DIR / uuid / "portfolio.csv"
+    legs_path = RUNS_DIR / uuid / "legs.csv"
 
     if not portfolio_path.exists():
         known = available_uuids()
         listing = "\n  ".join(known) if known else "(none)"
-        _fail(f"unknown run '{uuid}': no {portfolio_path.name}. Available runs:\n  {listing}")
+        _fail(f"unknown run '{uuid}': no {uuid}/portfolio.csv. Available runs:\n  {listing}")
 
     if not legs_path.exists() or legs_path.stat().st_size == 0:
-        _fail(f"legs CSV missing or empty for run {uuid} ({legs_path.name})")
+        _fail(f"legs CSV missing or empty for run {uuid} ({uuid}/legs.csv)")
 
     frame = pd.read_csv(portfolio_path)
     if frame.empty:
@@ -80,7 +80,8 @@ def render(uuid: str, returns) -> Path:
     except ImportError:
         _fail("quantstats is not installed — run `uv sync` inside analysis/")
 
-    output = RUNS_DIR / f"{uuid}.tearsheet.html"
+    output = RUNS_DIR / uuid / "tearsheet.html"
+    output.parent.mkdir(parents=True, exist_ok=True)
     title = f"X-Sectional Momentum — {uuid}"
     try:
         qs.reports.html(returns, output=str(output), title=title, download_filename=str(output))
@@ -106,7 +107,7 @@ def render(uuid: str, returns) -> Path:
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     group = parser.add_mutually_exclusive_group(required=True)
-    group.add_argument("--uuid", help="run id to render (keys runs/<uuid>.*)")
+    group.add_argument("--uuid", help="run id to render (keys runs/<uuid>/)")
     group.add_argument("--latest", action="store_true", help="render the most recently modified run")
     args = parser.parse_args(argv)
 

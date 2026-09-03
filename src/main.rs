@@ -85,11 +85,11 @@ pub struct XSectionalMomentum {
     #[builder(default)]
     returns: HashMap<InstrumentId, Decimal>,
 
-    /// The run UUID: keys `runs/<uuid>.*` and matches `logs/<uuid>.log`.
+    /// The run UUID: keys `runs/<uuid>/` and matches `logs/<uuid>/logs.log`.
     #[builder(default = Uuid::now_v7().to_string())]
     run_id: String,
 
-    /// Per-run artifact capture (`runs/<uuid>.{legs,portfolio,fills}.csv`).
+    /// Per-run artifact capture (`runs/<uuid>/{legs,portfolio,fills}.csv`).
     /// `None` until `on_start` opens the files.
     #[builder(skip)]
     capture: Option<RunCapture>,
@@ -368,8 +368,8 @@ impl XSectionalMomentum {
 }
 
 /// Resolve the run UUID from `--uuid <X>` (or `--uuid=<X>`), falling back to a
-/// fresh UUID-7. Echoed on stdout so the caller can key `logs/<UUID>.log` and
-/// the `runs/<UUID>.*` files to the same id.
+/// fresh UUID-7. Echoed on stdout so the caller can key `logs/<UUID>/logs.log`
+/// and the `runs/<UUID>/` files to the same id.
 fn resolve_run_id() -> String {
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {

@@ -13,14 +13,14 @@ uv sync            # inside analysis/, creates .venv from pyproject.toml
 ## Usage
 
 ```sh
-# render a specific run (keys runs/<uuid>.*)
+# render a specific run (keys runs/<uuid>/)
 uv run analysis/tearsheet.py --uuid 0193abcd-...
 
 # ...or the most recently modified run
 uv run analysis/tearsheet.py --latest
 ```
 
-Writes `runs/<uuid>.tearsheet.html` — a single self-contained file (styles
+Writes `runs/<uuid>/tearsheet.html` — a single self-contained file (styles
 inlined, charts embedded as base64 SVG; the only external reference is a
 favicon). The run id is in the `<title>` and the page heading.
 
@@ -28,10 +28,10 @@ favicon). The run id is in the `<title>` and the page heading.
 
 | File | Used for |
 | --- | --- |
-| `runs/<uuid>.portfolio.csv` | headline return series — the `net_return` column, indexed by month-end |
-| `runs/<uuid>.legs.csv`      | verified non-empty only; substrate for future per-leg diagnostics |
-| `runs/<uuid>.config.csv`    | not read yet; documents the run's parameters |
-| `runs/<uuid>.fills.csv`     | not read yet; per-`OrderFilled` rows for future per-trade attribution |
+| `runs/<uuid>/portfolio.csv` | headline return series — the `net_return` column, indexed by month-end |
+| `runs/<uuid>/legs.csv`      | verified non-empty only; substrate for future per-leg diagnostics |
+| `runs/<uuid>/config.csv`    | not read yet; documents the run's parameters |
+| `runs/<uuid>/fills.csv`     | not read yet; per-`OrderFilled` rows for future per-trade attribution |
 
 The CLI exits non-zero (and says why) on an unknown run id — listing the runs it
 can see — on an empty `portfolio.csv`, or if `quantstats` is not installed.

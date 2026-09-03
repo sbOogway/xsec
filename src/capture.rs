@@ -1,12 +1,12 @@
 //! Per-run artifact capture for the cross-sectional momentum backtest.
 //!
-//! A single backtest run writes four files under `runs/`, all keyed by the
-//! run UUID the user already uses for `logs/<UUID>.log`:
+//! A single backtest run writes four files under `runs/<UUID>/`, all keyed by
+//! the run UUID the user already uses for `logs/<UUID>/logs.log`:
 //!
-//! * `runs/<UUID>.config.csv`    — the strategy configuration (key,value).
-//! * `runs/<UUID>.legs.csv`      — one row per (entry month, instrument) leg.
-//! * `runs/<UUID>.portfolio.csv` — one row per rebalance month, the aggregate.
-//! * `runs/<UUID>.fills.csv`     — one row per `OrderFilled` event.
+//! * `runs/<UUID>/config.csv`    — the strategy configuration (key,value).
+//! * `runs/<UUID>/legs.csv`      — one row per (entry month, instrument) leg.
+//! * `runs/<UUID>/portfolio.csv` — one row per rebalance month, the aggregate.
+//! * `runs/<UUID>/fills.csv`     — one row per `OrderFilled` event.
 //!
 //! The portfolio file is the source of truth for the tearsheet's headline
 //! return series; the legs and fills files are substrate for future
@@ -68,7 +68,7 @@ impl YearMonth {
     }
 }
 
-/// The strategy configuration, written verbatim to `<UUID>.config.csv` so a
+/// The strategy configuration, written verbatim to `<UUID>/config.csv` so a
 /// tearsheet (or a human) can label a run without re-reading the source.
 pub struct RunConfig {
     pub run_id: String,
@@ -111,24 +111,28 @@ pub struct RunCapture {
 }
 
 impl RunCapture {
-    /// Open (append mode) the four run files, writing headers to any that are
-    /// new, and (re)write the config sidecar. Creates `runs/` on demand.
+    /// Open (append mode) the four run files under `runs/<run_id>/`, writing
+    /// headers to any that are new, and (re)write the config sidecar. Creates
+    /// the run directory on demand.
     pub fn open(cfg: &RunConfig) -> Result<Self> {
         Self::open_in(Path::new(RUN_DIR), cfg)
     }
 
-    pub fn open_in(dir: &Path, cfg: &RunConfig) -> Result<Self> {
-        fs::create_dir_all(dir).with_context(|| format!("create {}", dir.display()))?;
+    /// As [`open`](Self::open), but rooted at `base_dir` instead of `runs/`.
+    /// The per-run files land in `base_dir/<run_id>/`.
+    pub fn open_in(base_dir: &Path, cfg: &RunConfig) -> Result<Self> {
+        let dir = base_dir.join(&cfg.run_id);
+        fs::create_dir_all(&dir).with_context(|| format!("create {}", dir.display()))?;
 
-        let legs_path = dir.join(format!("{}.legs.csv", cfg.run_id));
-        let portfolio_path = dir.join(format!("{}.portfolio.csv", cfg.run_id));
-        let fills_path = dir.join(format!("{}.fills.csv", cfg.run_id));
+        let legs_path = dir.join("legs.csv");
+        let portfolio_path = dir.join("portfolio.csv");
+        let fills_path = dir.join("fills.csv");
 
         let legs = open_appending(&legs_path, LEGS_HEADER)?;
         let portfolio = open_appending(&portfolio_path, PORTFOLIO_HEADER)?;
         let fills = open_appending(&fills_path, FILLS_HEADER)?;
 
-        write_config(&dir.join(format!("{}.config.csv", cfg.run_id)), cfg)?;
+        write_config(&dir.join("config.csv"), cfg)?;
 
         Ok(Self {
             run_id: cfg.run_id.clone(),
