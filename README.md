@@ -4,8 +4,9 @@ A cross-sectional momentum backtest: a [Nautilus Trader](https://nautilustrader.
 strategy that each month goes long the top decile and short the bottom decile of
 a basket of Bybit USDT-margined linear perpetuals, ranked by trailing return.
 
-Each run produces a per-run **tearsheet** — a QuantStats HTML performance report
-— alongside the log.
+Each run produces two per-run HTML reports alongside the log: a QuantStats
+**tearsheet** (portfolio performance) and a **per-leg diagnostics** page
+(attribution, long/short book, return distribution, monthly breakdown).
 
 ## Prerequisites
 
@@ -21,7 +22,7 @@ make tearsheet              # fresh run, generated UUID-7
 make tearsheet UUID=<id>    # pin / re-render a specific run id
 ```
 
-`make tearsheet` runs the backtest (`make backtest`) then renders the tearsheet
+`make tearsheet` runs the backtest (`make backtest`) then renders both reports
 (`make report`). The same `UUID` keys everything for the run. The bare
 `cargo run --bin xsectional-rs` without `--uuid` generates one and prints
 `run_id=<UUID>` on stdout.
@@ -38,16 +39,17 @@ Everything for a run lives under a per-UUID directory:
 | `runs/<UUID>/portfolio.csv`     | one row per rebalance month — the aggregate return series |
 | `runs/<UUID>/fills.csv`         | one row per `OrderFilled` event (fill price, quantity, fee) |
 | `runs/<UUID>/tearsheet.html`    | the QuantStats tearsheet (self-contained; open in any browser) |
+| `runs/<UUID>/legs.html`         | the per-leg diagnostics report (self-contained; open in any browser) |
 
 `runs/` is per-machine, regenerable state — gitignored, like `target/`. The
 source-of-truth record of a run is its log.
 
-See [`analysis/README.md`](analysis/README.md) for the tearsheet CLI, its inputs,
+See [`analysis/README.md`](analysis/README.md) for the report CLIs, their inputs,
 and the exact return definitions.
 
 ## Tests
 
 ```sh
 cargo test                                         # Rust: schema-contract smoke test + unit tests
-uv run --project analysis pytest analysis/tests/   # Python: tearsheet CLI
+uv run --project analysis pytest analysis/tests/   # Python: tearsheet & per-leg CLIs
 ```

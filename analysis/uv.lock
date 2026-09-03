@@ -928,6 +928,7 @@ version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
     { name = "ipython" },
+    { name = "matplotlib" },
     { name = "numpy" },
     { name = "pandas" },
     { name = "quantstats" },
@@ -941,6 +942,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "ipython", specifier = "==8.31.0" },
+    { name = "matplotlib", specifier = "==3.11.1" },
     { name = "numpy", specifier = "==1.26.4" },
     { name = "pandas", specifier = "==2.2.3" },
     { name = "quantstats", specifier = "==0.0.62" },

@@ -1,8 +1,13 @@
-# analysis/ — tearsheet CLI
+# analysis/ — tearsheet & per-leg CLIs
 
-Renders a [QuantStats](https://github.com/ranaroussi/quantstats) HTML tearsheet
-from a backtest run's CSV artifacts. Pure Python, driven by [`uv`](https://docs.astral.sh/uv/);
-the Rust backtest and this script share nothing but the `runs/` directory.
+Two report generators over a backtest run's CSV artifacts. Pure Python, driven
+by [`uv`](https://docs.astral.sh/uv/); the Rust backtest and these scripts share
+nothing but the `runs/` directory.
+
+- `tearsheet.py` — a [QuantStats](https://github.com/ranaroussi/quantstats)
+  HTML tearsheet from the portfolio return series.
+- `legs.py` — per-leg diagnostics (attribution, long/short book, return
+  distribution, monthly breakdown) from `legs.csv`.
 
 ## Setup
 
@@ -18,26 +23,46 @@ env regardless of the working directory:
 ```sh
 # render a specific run (keys runs/<uuid>/)
 uv run --project analysis analysis/tearsheet.py --uuid 0193abcd-...
+uv run --project analysis analysis/legs.py --uuid 0193abcd-...
 
 # ...or the most recently modified run
 uv run --project analysis analysis/tearsheet.py --latest
+uv run --project analysis analysis/legs.py --latest
 ```
 
-Writes `runs/<uuid>/tearsheet.html` — a single self-contained file (styles
-inlined, charts embedded as base64 SVG; the only external reference is a
-favicon). The run id is in the `<title>` and the page heading.
+`make tearsheet` runs both after the backtest.
+
+`tearsheet.py` writes `runs/<uuid>/tearsheet.html` — a single self-contained
+file (styles inlined, charts embedded as base64 SVG; the only external reference
+is a favicon). The run id is in the `<title>` and the page heading.
+
+`legs.py` writes `runs/<uuid>/legs.html` — also self-contained (inline CSS,
+charts as base64 PNG, no external references). Four sections:
+
+- **Per-instrument attribution** — legs, win rate, mean/median return and total
+  USDT PnL (`per_leg_return × notional_usdt`) per instrument, plus a
+  best/worst-contributors bar chart.
+- **Long vs short book** — per-side stats and cumulative/monthly PnL by book.
+- **Leg return distribution** — hit rate, avg win/loss, payoff, skew/kurtosis,
+  a long/short histogram and the 10 best/worst legs.
+- **Per-month leg breakdown** — leg count, mean return, dispersion, min/max and
+  the long−short spread each month.
+
+A leg "wins" when `per_leg_return > 0` (a flat leg is not a win).
 
 ## Inputs
 
 | File | Used for |
 | --- | --- |
-| `runs/<uuid>/portfolio.csv` | headline return series — the `net_return` column, indexed by month-end |
-| `runs/<uuid>/legs.csv`      | verified non-empty only; substrate for future per-leg diagnostics |
+| `runs/<uuid>/portfolio.csv` | `tearsheet.py`: headline return series — the `net_return` column, indexed by month-end |
+| `runs/<uuid>/legs.csv`      | `legs.py`: per-leg attribution, book split, return distribution and monthly breakdown |
 | `runs/<uuid>/config.csv`    | not read yet; documents the run's parameters |
 | `runs/<uuid>/fills.csv`     | not read yet; per-`OrderFilled` rows for future per-trade attribution |
 
-The CLI exits non-zero (and says why) on an unknown run id — listing the runs it
-can see — on an empty `portfolio.csv`, or if `quantstats` is not installed.
+Both CLIs exit non-zero (and say why) on an unknown run id — listing the runs
+they can see — or on an empty / header-only input CSV. `legs.py` also fails if
+`legs.csv` is missing required columns; `tearsheet.py` fails if `quantstats` is
+not installed.
 
 ## Return definition (v1)
 
