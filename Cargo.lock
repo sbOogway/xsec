@@ -3359,6 +3359,7 @@ dependencies = [
  "rmp-serde",
  "rust_decimal",
  "tokio",
+ "uuid",
 ]
 
 [[package]]

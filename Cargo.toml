@@ -18,3 +18,4 @@ chrono = "0.4.45"
 rmp-serde = "1"
 log = "0.4.34"
 rust_decimal = "1.43.0"
+uuid = { version = "1.26", features = ["v7"] }

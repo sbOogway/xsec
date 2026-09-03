@@ -21,6 +21,7 @@ use nautilus_backtest::{
 };
 use nautilus_live::node::LiveNode;
 use rust_decimal::Decimal;
+use uuid::Uuid;
 
 use crate::data::{bar_type, structure::BoundedQueue};
 
@@ -79,6 +80,10 @@ pub struct XSectionalMomentum {
 
     #[builder(default)]
     returns: HashMap<InstrumentId, Decimal>,
+
+    /// The run UUID: keys `runs/<uuid>.*` and matches `logs/<uuid>.log`.
+    #[builder(default = Uuid::now_v7().to_string())]
+    run_id: String,
 }
 
 nautilus_strategy!(XSectionalMomentum, {
@@ -90,6 +95,7 @@ nautilus_strategy!(XSectionalMomentum, {
 impl Debug for XSectionalMomentum {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("XSectionalMomentum")
+            .field("run_id", &self.run_id)
             .field("core", &self.core)
             .field("symbols", &self.symbols)
             .field("warmup_bars", &self.lookback_months)
@@ -99,6 +105,7 @@ impl Debug for XSectionalMomentum {
 
 impl DataActor for XSectionalMomentum {
     fn on_start(&mut self) -> anyhow::Result<()> {
+        log::info!("run_id={}", self.run_id);
         log::info!("{:#?}", self);
 
         self.clock().set_timer(
@@ -286,13 +293,34 @@ impl XSectionalMomentum {
     }
 }
 
+/// Resolve the run UUID from `--uuid <X>` (or `--uuid=<X>`), falling back to a
+/// fresh UUID-7. Echoed on stdout so the caller can key `logs/<UUID>.log` and
+/// the `runs/<UUID>.*` files to the same id.
+fn resolve_run_id() -> String {
+    let mut args = std::env::args().skip(1);
+    while let Some(arg) = args.next() {
+        if let Some(value) = arg.strip_prefix("--uuid=") {
+            return value.to_string();
+        }
+        if arg == "--uuid"
+            && let Some(value) = args.next()
+        {
+            return value;
+        }
+    }
+    Uuid::now_v7().to_string()
+}
+
 fn main() {
     nautilus_common::logging::ensure_logging_initialized();
+
+    let run_id = resolve_run_id();
+    println!("run_id={run_id}");
 
     match ENVIRONMENT {
         Environment::Backtest => {
             let mut engine = BacktestEngine::new(BacktestEngineConfig::default()).unwrap();
-            let strategy = XSectionalMomentum::builder().build();
+            let strategy = XSectionalMomentum::builder().run_id(run_id).build();
 
             engine
                 .add_venue(
@@ -346,7 +374,7 @@ fn main() {
             use nautilus_common::factories::ClientConfig;
             use nautilus_model::identifiers::TraderId;
 
-            let strategy = XSectionalMomentum::builder().build();
+            let strategy = XSectionalMomentum::builder().run_id(run_id).build();
 
             let config = BybitDataClientConfig {
                 product_types: vec![BybitProductType::Linear],
