@@ -20,13 +20,14 @@ use nautilus_backtest::{
     engine::BacktestEngine,
 };
 use nautilus_live::node::LiveNode;
-use rust_decimal::Decimal;
+use rust_decimal::{Decimal, prelude::ToPrimitive};
 use uuid::Uuid;
 
 use xsectional_rs::{
     capture::{RunCapture, RunConfig, YearMonth},
     data,
     data::{bar_type, structure::BoundedQueue},
+    sizing::{self, Conviction},
 };
 
 const VENUE: &str = "BYBIT";
@@ -52,10 +53,20 @@ const LOOKBACK_MONTHS: u16 = 3;
 
 const PERCENTILE: &str = "0.1";
 
-const DOLLAR_POSITION_SIZE: f64 = 50.0;
+/// Gross exposure target as a fraction of account equity, snapshotted from the
+/// simulated account at each rebalance. 1.0 = 100% gross (≈ `LONG_W` long +
+/// `1 - LONG_W` short).
+const RISK_PCT: f64 = 0.8;
+/// Share of the gross budget allocated to the long side; the short side gets
+/// the remainder. 0.5 = dollar-neutral.
+const LONG_W: f64 = 0.5;
+/// Within-side allocation tilt toward higher-conviction names. 0.0 = equal
+/// dollars per leg; larger leans capital onto the strongest signals.
+const SIGNAL_TILT: f64 = 0.0;
+
 const STARTING_BALANCE: &str = "1_000 USDT";
 
-const DATE_START: &str = "2025-01-01";
+const DATE_START: &str = "2023-01-01";
 const DATE_END: &str = "2026-08-01";
 
 #[derive(bon::Builder)]
@@ -123,6 +134,13 @@ impl DataActor for XSectionalMomentum {
         log::info!("run_id={}", self.run_id);
         log::info!("{:#?}", self);
 
+        if self.holding_months != 1 {
+            log::warn!(
+                "holding_months={} but this build only supports 1 (close-all-then-reopen each rebalance)",
+                self.holding_months
+            );
+        }
+
         self.capture = Some(RunCapture::open(&RunConfig {
             run_id: self.run_id.clone(),
             lookback_months: self.lookback_months,
@@ -132,7 +150,9 @@ impl DataActor for XSectionalMomentum {
             date_end: DATE_END.to_string(),
             bases: BASES.iter().map(|b| b.to_string()).collect(),
             starting_balance: STARTING_BALANCE.to_string(),
-            dollar_position_size: DOLLAR_POSITION_SIZE,
+            risk_pct: RISK_PCT,
+            long_w: LONG_W,
+            signal_tilt: SIGNAL_TILT,
         })?);
 
         self.clock().set_timer(
@@ -191,17 +211,13 @@ impl DataActor for XSectionalMomentum {
             return anyhow::Ok(());
         }
 
+        // Close-all-then-reopen: every rebalance liquidates the whole book, then
+        // rebuilds it at fresh target notionals off the current equity. The
+        // holding period is therefore exactly one rebalance (see the
+        // `holding_months != 1` warning in `on_start`).
         let open_positions = self.cache().positions_open(None, None, None, None, None);
-
         for position in open_positions {
-            let holding_ns = 27_u64 * self.holding_months as u64 * 86_400 * 1_000_000_000;
-            let age_ns = event
-                .ts_event
-                .as_u64()
-                .saturating_sub(position.ts_opened.as_u64());
-            if age_ns > holding_ns {
-                let _ = self.close_position(&position, None, None, None, None, None, None);
-            }
+            let _ = self.close_position(&position, None, None, None, None, None, None);
         }
 
         log::info!("hello from on_time_event {}", event);
@@ -257,13 +273,42 @@ impl DataActor for XSectionalMomentum {
         let entry_month = YearMonth::from_nanos(event.ts_event.as_u64());
         let mut legs: Vec<(InstrumentId, OrderSide, Decimal, f64)> = Vec::new();
 
-        let entries = percentile_bottom
+        // Gross budget for this rebalance, split between the two sides. Sizing is
+        // off the equity the account reports *now*, so the book compounds.
+        let equity = self.usdt_equity();
+        let budget = RISK_PCT * equity.to_f64().unwrap_or(0.0);
+        let (long_budget, short_budget) = sizing::split_sides(budget, LONG_W);
+
+        let short_signals: Vec<(InstrumentId, f64)> = percentile_bottom
             .iter()
-            .map(|(i, _)| (**i, OrderSide::Sell))
-            .chain(percentile_top.iter().map(|(i, _)| (**i, OrderSide::Buy)))
+            .map(|(i, r)| (**i, r.to_f64().unwrap_or(0.0)))
+            .collect();
+        let long_signals: Vec<(InstrumentId, f64)> = percentile_top
+            .iter()
+            .map(|(i, r)| (**i, r.to_f64().unwrap_or(0.0)))
+            .collect();
+
+        let allocation = sizing::allocate(short_budget, &short_signals, SIGNAL_TILT, Conviction::Low)
+            .into_iter()
+            .map(|(id, n)| (id, OrderSide::Sell, n))
+            .chain(
+                sizing::allocate(long_budget, &long_signals, SIGNAL_TILT, Conviction::High)
+                    .into_iter()
+                    .map(|(id, n)| (id, OrderSide::Buy, n)),
+            )
             .collect::<Vec<_>>();
-        for (instrument, side) in entries {
-            if !self.submit_notional_market(instrument, side, DOLLAR_POSITION_SIZE) {
+
+        let net_notional: f64 = allocation
+            .iter()
+            .map(|&(_, side, n)| if side == OrderSide::Sell { -n } else { n })
+            .sum();
+        log::info!(
+            "rebalance {}: equity={equity} budget={budget:.2} long={long_budget:.2} short={short_budget:.2} net_notional={net_notional:.2}",
+            entry_month.label()
+        );
+
+        for (instrument, side, notional) in allocation {
+            if !self.submit_notional_market(instrument, side, notional) {
                 continue;
             }
             // Entry mark: the close of the last monthly bar before this
@@ -272,11 +317,10 @@ impl DataActor for XSectionalMomentum {
             if let Some(entry_price) =
                 self.prices.get(&instrument).and_then(|q| q.inner.back().copied())
             {
-                legs.push((instrument, side, entry_price, DOLLAR_POSITION_SIZE));
+                legs.push((instrument, side, entry_price, notional));
             }
         }
 
-        let equity = self.usdt_equity();
         let latest_close = self.latest_closes();
         if let Some(capture) = self.capture.as_mut() {
             capture.record_rebalance(entry_month, equity, legs);

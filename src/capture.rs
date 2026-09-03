@@ -85,7 +85,12 @@ pub struct RunConfig {
     pub date_end: String,
     pub bases: Vec<String>,
     pub starting_balance: String,
-    pub dollar_position_size: f64,
+    /// Gross exposure target as a fraction of account equity, per rebalance.
+    pub risk_pct: f64,
+    /// Share of the gross budget on the long side (0.5 = dollar-neutral).
+    pub long_w: f64,
+    /// Within-side allocation tilt toward higher-conviction names (0 = equal).
+    pub signal_tilt: f64,
 }
 
 /// A leg the strategy has entered but not yet priced out (the exit mark is
@@ -363,7 +368,9 @@ fn write_config(path: &Path, cfg: &RunConfig) -> Result<()> {
     writeln!(w, "percentile,{}", cfg.percentile)?;
     writeln!(w, "date_start,{}", cfg.date_start)?;
     writeln!(w, "date_end,{}", cfg.date_end)?;
-    writeln!(w, "dollar_position_size,{}", cfg.dollar_position_size)?;
+    writeln!(w, "risk_pct,{}", cfg.risk_pct)?;
+    writeln!(w, "long_w,{}", cfg.long_w)?;
+    writeln!(w, "signal_tilt,{}", cfg.signal_tilt)?;
     writeln!(w, "starting_balance,{}", cfg.starting_balance)?;
     writeln!(w, "bases,{}", cfg.bases.join(" "))?;
     w.flush()?;
