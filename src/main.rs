@@ -7,7 +7,7 @@ use nautilus_core::UnixNanos;
 use nautilus_model::{
     data::{Bar, Data},
     enums::{AccountType, BarAggregation, BookType, OmsType, OrderSide},
-    events::PositionOpened,
+    events::{OrderFilled, PositionOpened},
     identifiers::{InstrumentId, StrategyId, Venue},
     instruments::Instrument,
     types::{Money, Quantity},
@@ -23,9 +23,13 @@ use nautilus_live::node::LiveNode;
 use rust_decimal::Decimal;
 use uuid::Uuid;
 
-use crate::data::{bar_type, structure::BoundedQueue};
+use xsectional_rs::{
+    capture::{RunCapture, RunConfig, YearMonth},
+    data,
+    data::{bar_type, structure::BoundedQueue},
+};
 
-mod data;
+const VENUE: &str = "BYBIT";
 
 const ENVIRONMENT: Environment = Environment::Backtest;
 const BASES: &[&str] = &[
@@ -84,11 +88,22 @@ pub struct XSectionalMomentum {
     /// The run UUID: keys `runs/<uuid>.*` and matches `logs/<uuid>.log`.
     #[builder(default = Uuid::now_v7().to_string())]
     run_id: String,
+
+    /// Per-run artifact capture (`runs/<uuid>.{legs,portfolio,fills}.csv`).
+    /// `None` until `on_start` opens the files.
+    #[builder(skip)]
+    capture: Option<RunCapture>,
 }
 
 nautilus_strategy!(XSectionalMomentum, {
     fn on_position_opened(&mut self, event: PositionOpened) {
         log::info!("new position debug {:#?}", event);
+    }
+
+    fn on_order_filled(&mut self, event: &OrderFilled) {
+        if let Some(capture) = self.capture.as_mut() {
+            capture.record_fill(event);
+        }
     }
 });
 
@@ -107,6 +122,18 @@ impl DataActor for XSectionalMomentum {
     fn on_start(&mut self) -> anyhow::Result<()> {
         log::info!("run_id={}", self.run_id);
         log::info!("{:#?}", self);
+
+        self.capture = Some(RunCapture::open(&RunConfig {
+            run_id: self.run_id.clone(),
+            lookback_months: self.lookback_months,
+            holding_months: self.holding_months,
+            percentile: PERCENTILE.to_string(),
+            date_start: DATE_START.to_string(),
+            date_end: DATE_END.to_string(),
+            bases: BASES.iter().map(|b| b.to_string()).collect(),
+            starting_balance: STARTING_BALANCE.to_string(),
+            dollar_position_size: DOLLAR_POSITION_SIZE,
+        })?);
 
         self.clock().set_timer(
             "DAILY",
@@ -149,6 +176,11 @@ impl DataActor for XSectionalMomentum {
 
     fn on_stop(&mut self) -> anyhow::Result<()> {
         log::info!("XSectionalMomentum stopped");
+        let equity = self.usdt_equity();
+        let latest_close = self.latest_closes();
+        if let Some(capture) = self.capture.as_mut() {
+            capture.finish(&latest_close, equity);
+        }
         anyhow::Ok(())
     }
 
@@ -216,18 +248,39 @@ impl DataActor for XSectionalMomentum {
         log::info!("returns bottom {:#?}", percentile_bottom);
         log::info!("returns top {:#?}", percentile_top);
 
-        let account = self.cache().account_for_venue(&Venue::new("BYBIT"));
+        let account = self.cache().account_for_venue(&Venue::new(VENUE));
         let binding = account.unwrap();
         let balances = binding.balances();
 
         log::info!("balance {:#?}", balances);
 
-        for (instrument, _) in percentile_bottom {
-            self.submit_notional_market(**instrument, OrderSide::Sell, DOLLAR_POSITION_SIZE);
+        let entry_month = YearMonth::from_nanos(event.ts_event.as_u64());
+        let mut legs: Vec<(InstrumentId, OrderSide, Decimal, f64)> = Vec::new();
+
+        let entries = percentile_bottom
+            .iter()
+            .map(|(i, _)| (**i, OrderSide::Sell))
+            .chain(percentile_top.iter().map(|(i, _)| (**i, OrderSide::Buy)))
+            .collect::<Vec<_>>();
+        for (instrument, side) in entries {
+            if !self.submit_notional_market(instrument, side, DOLLAR_POSITION_SIZE) {
+                continue;
+            }
+            // Entry mark: the close of the last monthly bar before this
+            // rebalance. Paired with the same instrument's close one rebalance
+            // later, this is a clean close-to-close holding-period return.
+            if let Some(entry_price) =
+                self.prices.get(&instrument).and_then(|q| q.inner.back().copied())
+            {
+                legs.push((instrument, side, entry_price, DOLLAR_POSITION_SIZE));
+            }
         }
 
-        for (instrument, _) in percentile_top {
-            self.submit_notional_market(**instrument, OrderSide::Buy, DOLLAR_POSITION_SIZE);
+        let equity = self.usdt_equity();
+        let latest_close = self.latest_closes();
+        if let Some(capture) = self.capture.as_mut() {
+            capture.record_rebalance(entry_month, equity, legs);
+            capture.finalise_completed(entry_month, &latest_close, equity);
         }
 
         self.last_month = current_month;
@@ -236,15 +289,38 @@ impl DataActor for XSectionalMomentum {
 }
 
 impl XSectionalMomentum {
+    /// Total USDT equity (cash + position mark-to-market) reported by the
+    /// simulated venue, or zero if the account is not yet known.
+    fn usdt_equity(&self) -> Decimal {
+        self.portfolio()
+            .equity(&Venue::new(VENUE), None)
+            .iter()
+            .find(|(currency, _)| currency.code.as_str() == "USDT")
+            .map(|(_, money)| money.as_decimal())
+            .unwrap_or(Decimal::ZERO)
+    }
+
+    /// The most recent close seen per instrument — the exit mark used to price
+    /// out legs one rebalance after entry.
+    fn latest_closes(&self) -> HashMap<InstrumentId, Decimal> {
+        self.prices
+            .iter()
+            .filter_map(|(id, queue)| queue.inner.back().map(|close| (*id, *close)))
+            .collect()
+    }
+
+    /// Submit a market order sized to `notional_usdt`. Returns `true` if the
+    /// order was submitted, `false` if it was skipped (no instrument/bar, or
+    /// the notional rounds below the minimum lot).
     fn submit_notional_market(
         &mut self,
         instrument_id: InstrumentId,
         side: OrderSide,
         notional_usdt: f64,
-    ) {
+    ) -> bool {
         let Some(cached) = self.cache().instrument(&instrument_id) else {
             log::warn!("no instrument cached for {instrument_id}, skipping");
-            return;
+            return false;
         };
         let bt = bar_type(instrument_id, TIMEFRAME);
         let Some(bar) = self
@@ -253,25 +329,25 @@ impl XSectionalMomentum {
             .or_else(|| self.cache().bar(&bt))
         else {
             log::warn!("no bar cached for {instrument_id}, skipping");
-            return;
+            return false;
         };
         let close = bar.close.as_f64();
         if !close.is_finite() || close <= 0.0 {
             log::warn!("invalid close {close} for {instrument_id}, skipping");
-            return;
+            return false;
         }
         let precision = cached.size_precision();
         let units = notional_usdt / close;
         if !units.is_finite() || units <= 0.0 {
             log::warn!("computed quantity {units} for {instrument_id}, skipping");
-            return;
+            return false;
         }
         let min_lot = 10f64.powi(-(precision as i32));
         if units + f64::EPSILON < min_lot {
             log::warn!(
                 "notional {notional_usdt} USDT rounds to 0 for {instrument_id} at precision {precision} (min lot ~{min_lot}); skipping"
             );
-            return;
+            return false;
         }
         let order = self.order().market(
             instrument_id,
@@ -285,11 +361,9 @@ impl XSectionalMomentum {
             None,
             None,
         );
-        // log::info!("{}", order);
-        // self.orders.push(order.clone());
         let _ = self.submit_order(order.clone(), None, None, None);
 
-        // Some(order)
+        true
     }
 }
 
