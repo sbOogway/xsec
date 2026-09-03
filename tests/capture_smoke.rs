@@ -63,7 +63,9 @@ fn capture_writes_the_contract() {
         date_end: "2025-07-01".to_string(),
         bases: vec!["BTC".to_string(), "ETH".to_string()],
         starting_balance: "1000 USDT".to_string(),
-        dollar_position_size: 50.0,
+        risk_pct: 1.0,
+        long_w: 0.5,
+        signal_tilt: 0.0,
     };
 
     let mut capture = RunCapture::open_in(dir.path(), &cfg).unwrap();
