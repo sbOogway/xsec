@@ -7,17 +7,20 @@ the Rust backtest and this script share nothing but the `runs/` directory.
 ## Setup
 
 ```sh
-uv sync            # inside analysis/, creates .venv from pyproject.toml
+uv sync --project analysis   # creates analysis/.venv from analysis/pyproject.toml
 ```
 
 ## Usage
 
+Run from the repo root. `--project analysis` points `uv` at this directory's
+env regardless of the working directory:
+
 ```sh
 # render a specific run (keys runs/<uuid>/)
-uv run analysis/tearsheet.py --uuid 0193abcd-...
+uv run --project analysis analysis/tearsheet.py --uuid 0193abcd-...
 
 # ...or the most recently modified run
-uv run analysis/tearsheet.py --latest
+uv run --project analysis analysis/tearsheet.py --latest
 ```
 
 Writes `runs/<uuid>/tearsheet.html` — a single self-contained file (styles
@@ -61,5 +64,5 @@ cross-check.
 ## Tests
 
 ```sh
-uv run pytest analysis/tests/
+uv run --project analysis pytest analysis/tests/
 ```

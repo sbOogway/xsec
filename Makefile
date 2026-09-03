@@ -28,4 +28,4 @@ backtest:
 
 ## Render runs/<UUID>/tearsheet.html from the captured CSVs.
 report:
-	uv run analysis/tearsheet.py --uuid "$(UUID)"
+	uv run --project analysis analysis/tearsheet.py --uuid "$(UUID)"

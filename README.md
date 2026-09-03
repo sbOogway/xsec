@@ -48,6 +48,6 @@ and the exact return definitions.
 ## Tests
 
 ```sh
-cargo test                      # Rust: schema-contract smoke test + unit tests
-uv run pytest analysis/tests/   # Python: tearsheet CLI
+cargo test                                         # Rust: schema-contract smoke test + unit tests
+uv run --project analysis pytest analysis/tests/   # Python: tearsheet CLI
 ```
