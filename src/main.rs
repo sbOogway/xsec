@@ -34,17 +34,16 @@ const VENUE: &str = "BYBIT";
 
 const ENVIRONMENT: Environment = Environment::Backtest;
 const BASES: &[&str] = &[
-    "BTC", "ETH", "BNB", "XRP", "SOL", "TRX", "DOGE", "XMR", "LINK", "ADA", "XLM",
-    "BCH", "LTC", "UNI", "HBAR", "AVAX", "SUI", "CRO", "TAO", "NEAR", "OKB", "AAVE",
-    "MNT", "ONDO", "ENA", "DOT", "ICP", "MORPHO", "WLD", "ETC", "OP", "POL", "ALGO", "QNT", "ATOM",
-    "KAS", "ARB", "RENDER", "FIL", "CAKE", "CRV", "INJ", "STX", "TIA", "VET", "JUP", 
-    "HYPE", "ASTER", "ZEC","CC", "GRAM" ,
-    "PYTH", "PUMPFUN", "1000PEPE", "EIGEN", "FLR", "IMX", "JST", "SEI", "XDC", "JST"
-    // "JST", "KITE", "FF", "GRAM", "LIT", "PENDLE", "LDO", "CFX", "XTZ", "JASMY", "TWT", "CVX",
-    // "ENS", "JTO", "WIF", "COMP", "STRK", "2Z", "KAIA", "IOTA", "ZBCN", "THETA", "AXS", "NEO",
-    // "CHZ", "EGLD", "APE", "AR", "MANA", "SAND", "BAT", "KSM", "DYDX", "GLM", "QTUM", "ZRX", "GMX",
-    // "ORCA", "KAITO", "COW", "SNX", "LPT", "NMR", "BR", "SUPER", "AIOZ", "ARC", "WAL", "ETHFI",
-    // "SSV",
+    "BTC", "ETH", "BNB", "XRP", "SOL", "TRX", "DOGE", "XMR", "LINK", "ADA", "XLM", "BCH", "LTC",
+    "UNI", "HBAR", "AVAX", "SUI", "CRO", "TAO", "NEAR", "OKB", "AAVE", "MNT", "ONDO", "ENA", "DOT",
+    "ICP", "MORPHO", "WLD", "ETC", "OP", "POL", "ALGO", "QNT", "ATOM", "KAS", "ARB", "RENDER",
+    "FIL", "CAKE", "CRV", "INJ", "STX", "TIA", "VET", "JUP", "HYPE", "ASTER", "ZEC", "CC", "GRAM",
+    "PYTH", "PUMPFUN", "1000PEPE", "EIGEN", "FLR", "IMX", "JST", "SEI", "XDC",
+    "JST", // "JST", "KITE", "FF", "GRAM", "LIT", "PENDLE", "LDO", "CFX", "XTZ", "JASMY", "TWT", "CVX",
+           // "ENS", "JTO", "WIF", "COMP", "STRK", "2Z", "KAIA", "IOTA", "ZBCN", "THETA", "AXS", "NEO",
+           // "CHZ", "EGLD", "APE", "AR", "MANA", "SAND", "BAT", "KSM", "DYDX", "GLM", "QTUM", "ZRX", "GMX",
+           // "ORCA", "KAITO", "COW", "SNX", "LPT", "NMR", "BR", "SUPER", "AIOZ", "ARC", "WAL", "ETHFI",
+           // "SSV",
 ];
 const TIMEFRAME: BarAggregation = BarAggregation::Month;
 
@@ -59,15 +58,15 @@ const PERCENTILE: &str = "0.1";
 const RISK_PCT: f64 = 0.8;
 /// Share of the gross budget allocated to the long side; the short side gets
 /// the remainder. 0.5 = dollar-neutral.
-const LONG_W: f64 = 0.5;
+const LONG_W: f64 = 0.6;
 /// Within-side allocation tilt toward higher-conviction names. 0.0 = equal
 /// dollars per leg; larger leans capital onto the strongest signals.
 const SIGNAL_TILT: f64 = 0.0;
 
 const STARTING_BALANCE: &str = "1_000 USDT";
 
-const DATE_START: &str = "2023-01-01";
-const DATE_END: &str = "2026-08-01";
+const DATE_START: &str = "2020-01-01";
+const DATE_END: &str = "2026-09-02";
 
 #[derive(bon::Builder)]
 pub struct XSectionalMomentum {
@@ -79,7 +78,7 @@ pub struct XSectionalMomentum {
     core: StrategyCore,
 
     #[builder(default = BASES.into_iter().map(|base|{format!("{}USDT-LINEAR.BYBIT", base)}).map(InstrumentId::from).collect())]
-    symbols: Vec<InstrumentId>,
+    instruments: Vec<InstrumentId>,
 
     #[builder(default = HOLDING_MONTHS)]
     holding_months: u16,
@@ -123,7 +122,7 @@ impl Debug for XSectionalMomentum {
         f.debug_struct("XSectionalMomentum")
             .field("run_id", &self.run_id)
             .field("core", &self.core)
-            .field("symbols", &self.symbols)
+            .field("instruments", &self.instruments)
             .field("warmup_bars", &self.lookback_months)
             .finish()
     }
@@ -169,7 +168,7 @@ impl DataActor for XSectionalMomentum {
         let warmup = std::num::NonZeroUsize::new(self.lookback_months as usize)
             .ok_or_else(|| anyhow!("warmup_bars must be > 0"))?;
 
-        let symbols = self.symbols.clone();
+        let symbols = self.instruments.clone();
         for symbol in symbols {
             let bar_type = bar_type(symbol, TIMEFRAME);
             log::info!("[{}] requesting {warmup} warmup bars", symbol);
@@ -230,36 +229,36 @@ impl DataActor for XSectionalMomentum {
         }
 
         log::info!("hello from on_time_event {}", event);
-        for symbol in &self.symbols {
-            let bar_type = bar_type(*symbol, TIMEFRAME);
-            log::debug!("{} -> {:?}", symbol, self.cache().bar(&bar_type));
+        for instrument in &self.instruments {
+            let bar_type = bar_type(*instrument, TIMEFRAME);
+            log::debug!("{} -> {:?}", instrument, self.cache().bar(&bar_type));
             log::debug!(
                 "{} -> {:#?}",
-                symbol,
-                self.prices.get(symbol).unwrap().inner
+                instrument,
+                self.prices.get(instrument).unwrap().inner
             );
 
-            let price_lookback_months = self.prices.get(symbol).unwrap().inner.get(0);
+            let price_lookback_months = self.prices.get(instrument).unwrap().inner.get(0);
             let price_current = self
                 .prices
-                .get(symbol)
+                .get(instrument)
                 .unwrap()
                 .inner
                 .get((self.lookback_months - 1).into());
             if price_current == None {
-                self.returns.remove(symbol);
+                self.returns.remove(instrument);
                 continue;
             }
 
             let returns_lookback = (price_current.unwrap() - price_lookback_months.unwrap())
                 / price_lookback_months.unwrap();
 
-            log::debug!("{} return lookback -> {}", symbol, returns_lookback);
-            self.returns.insert(*symbol, returns_lookback);
+            log::debug!("{} return lookback -> {}", instrument, returns_lookback);
+            self.returns.insert(*instrument, returns_lookback);
         }
 
-        let binding = self.returns.clone();
-        let mut sorted_returns: Vec<(&InstrumentId, &Decimal)> = binding.iter().collect();
+        let returns_clone = self.returns.clone();
+        let mut sorted_returns: Vec<(&InstrumentId, &Decimal)> = returns_clone.iter().collect();
         sorted_returns.sort_by_key(|&(_, v)| v);
 
         let percentile_size = (Decimal::from_str(PERCENTILE).unwrap()
@@ -273,9 +272,8 @@ impl DataActor for XSectionalMomentum {
         log::info!("returns bottom {:#?}", percentile_bottom);
         log::info!("returns top {:#?}", percentile_top);
 
-        let account = self.cache().account_for_venue(&Venue::new(VENUE));
-        let binding = account.unwrap();
-        let balances = binding.balances();
+        let account = self.cache().account_for_venue(&Venue::new(VENUE)).unwrap();
+        let balances = account.balances();
 
         log::info!("balance {:#?}", balances);
 
@@ -297,15 +295,16 @@ impl DataActor for XSectionalMomentum {
             .map(|(i, r)| (**i, r.to_f64().unwrap_or(0.0)))
             .collect();
 
-        let allocation = sizing::allocate(short_budget, &short_signals, SIGNAL_TILT, Conviction::Low)
-            .into_iter()
-            .map(|(id, n)| (id, OrderSide::Sell, n))
-            .chain(
-                sizing::allocate(long_budget, &long_signals, SIGNAL_TILT, Conviction::High)
-                    .into_iter()
-                    .map(|(id, n)| (id, OrderSide::Buy, n)),
-            )
-            .collect::<Vec<_>>();
+        let allocation =
+            sizing::allocate(short_budget, &short_signals, SIGNAL_TILT, Conviction::Low)
+                .into_iter()
+                .map(|(id, n)| (id, OrderSide::Sell, n))
+                .chain(
+                    sizing::allocate(long_budget, &long_signals, SIGNAL_TILT, Conviction::High)
+                        .into_iter()
+                        .map(|(id, n)| (id, OrderSide::Buy, n)),
+                )
+                .collect::<Vec<_>>();
 
         let net_notional: f64 = allocation
             .iter()
@@ -323,8 +322,10 @@ impl DataActor for XSectionalMomentum {
             // Entry mark: the close of the last monthly bar before this
             // rebalance. Paired with the same instrument's close one rebalance
             // later, this is a clean close-to-close holding-period return.
-            if let Some(entry_price) =
-                self.prices.get(&instrument).and_then(|q| q.inner.back().copied())
+            if let Some(entry_price) = self
+                .prices
+                .get(&instrument)
+                .and_then(|q| q.inner.back().copied())
             {
                 legs.push((instrument, side, entry_price, notional));
             }
@@ -375,11 +376,11 @@ impl XSectionalMomentum {
             log::warn!("no instrument cached for {instrument_id}, skipping");
             return false;
         };
-        let bt = bar_type(instrument_id, TIMEFRAME);
+        let bar_type = bar_type(instrument_id, TIMEFRAME);
         let Some(bar) = self
             .cache()
-            .bar_at_index(&bt, 1)
-            .or_else(|| self.cache().bar(&bt))
+            .bar_at_index(&bar_type, 1)
+            .or_else(|| self.cache().bar(&bar_type))
         else {
             log::warn!("no bar cached for {instrument_id}, skipping");
             return false;
@@ -468,9 +469,7 @@ fn main() {
                 .collect();
 
             let rt = tokio::runtime::Runtime::new().unwrap();
-            let instruments = rt
-                .block_on(data::fetch_linear_instruments())
-                .unwrap();
+            let instruments = rt.block_on(data::fetch_linear_instruments()).unwrap();
             data::seed_instruments(&instruments);
             for inst in &instruments {
                 if symbols.contains(&inst.id()) {
