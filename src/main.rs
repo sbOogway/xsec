@@ -23,7 +23,7 @@ use nautilus_backtest::{
 use nautilus_live::node::LiveNode;
 use rust_decimal::{Decimal, prelude::ToPrimitive};
 
-use xsectional_rs::{
+use xsec::{
     capture::{RunCapture, YearMonth}, config::{self, Cli, RunConfig}, data::{self, get_bar_type, structure::BoundedQueue}, sizing::{self, Conviction}, strategy::XSectionalMomentum,
 };
 

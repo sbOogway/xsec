@@ -13,7 +13,7 @@ use rust_decimal::Decimal;
 use tempfile::tempdir;
 
 use nautilus_model::{enums::OrderSide, identifiers::InstrumentId};
-use xsectional_rs::capture::{RunCapture, RunConfig, YearMonth};
+use xsec::capture::{RunCapture, RunConfig, YearMonth};
 
 // The schema downstream tooling depends on — pinned here as literals so a
 // change to the capture headers has to be a deliberate change to this test too.
