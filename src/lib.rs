@@ -9,3 +9,4 @@ pub mod config;
 pub mod data;
 pub mod sizing;
 pub mod universe;
+pub mod strategy;
