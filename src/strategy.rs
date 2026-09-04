@@ -15,7 +15,7 @@ use nautilus_trading::{Strategy, StrategyConfig, StrategyCore, nautilus_strategy
 use crate::{
     capture::{RunCapture, YearMonth},
     config::{self, RunConfig},
-    data::{bar_type, structure::BoundedQueue},
+    data::{get_bar_type, structure::BoundedQueue},
     sizing::{self, Conviction},
 };
 
@@ -109,7 +109,7 @@ impl DataActor for XSectionalMomentum {
 
         let instruments = self.instruments.clone();
         for instrument in instruments {
-            let bar_type = bar_type(instrument, config::TIMEFRAME);
+            let bar_type = get_bar_type(instrument, config::TIMEFRAME);
             log::info!("[{}] requesting {warmup} warmup bars", instrument);
 
             self.request_bars(bar_type, None, None, Some(warmup), None, None)?;
@@ -170,7 +170,7 @@ impl DataActor for XSectionalMomentum {
 
         log::info!("hello from on_time_event {}", event);
         for instrument in &self.instruments {
-            let bar_type = bar_type(*instrument, config::TIMEFRAME);
+            let bar_type = get_bar_type(*instrument, config::TIMEFRAME);
             log::debug!("{} -> {:?}", instrument, self.cache().bar(&bar_type));
             log::debug!(
                 "{} -> {:#?}",
@@ -320,7 +320,7 @@ impl XSectionalMomentum {
             log::warn!("no instrument cached for {instrument_id}, skipping");
             return false;
         };
-        let bar_type = bar_type(instrument_id, config::TIMEFRAME);
+        let bar_type = get_bar_type(instrument_id, config::TIMEFRAME);
         let Some(bar) = self
             .cache()
             .bar_at_index(&bar_type, 1)

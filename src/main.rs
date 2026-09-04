@@ -24,7 +24,7 @@ use nautilus_live::node::LiveNode;
 use rust_decimal::{Decimal, prelude::ToPrimitive};
 
 use xsectional_rs::{
-    capture::{RunCapture, YearMonth}, config::{self, Cli, RunConfig}, data::{self, bar_type, structure::BoundedQueue}, sizing::{self, Conviction}, strategy::XSectionalMomentum,
+    capture::{RunCapture, YearMonth}, config::{self, Cli, RunConfig}, data::{self, get_bar_type, structure::BoundedQueue}, sizing::{self, Conviction}, strategy::XSectionalMomentum,
 };
 
 /// Which runtime to boot. The `Backtest` path is the one that is wired end to
