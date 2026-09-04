@@ -76,22 +76,10 @@ impl YearMonth {
 
 /// The strategy configuration, written verbatim to `<UUID>/config.csv` so a
 /// tearsheet (or a human) can label a run without re-reading the source.
-pub struct RunConfig {
-    pub run_id: String,
-    pub lookback_months: u16,
-    pub holding_months: u16,
-    pub percentile: String,
-    pub date_start: String,
-    pub date_end: String,
-    pub bases: Vec<String>,
-    pub starting_balance: String,
-    /// Gross exposure target as a fraction of account equity, per rebalance.
-    pub risk_pct: f64,
-    /// Share of the gross budget on the long side (0.5 = dollar-neutral).
-    pub long_w: f64,
-    /// Within-side allocation tilt toward higher-conviction names (0 = equal).
-    pub signal_tilt: f64,
-}
+///
+/// Defined in [`crate::config`] (it is also the strategy's runtime input) and
+/// re-exported here for the capture API.
+pub use crate::config::RunConfig;
 
 /// A leg the strategy has entered but not yet priced out (the exit mark is
 /// only known one rebalance later).
@@ -373,6 +361,8 @@ fn write_config(path: &Path, cfg: &RunConfig) -> Result<()> {
     writeln!(w, "signal_tilt,{}", cfg.signal_tilt)?;
     writeln!(w, "starting_balance,{}", cfg.starting_balance)?;
     writeln!(w, "bases,{}", cfg.bases.join(" "))?;
+    writeln!(w, "universe_path,{}", cfg.universe_path)?;
+    writeln!(w, "argv,{}", cfg.argv)?;
     w.flush()?;
     Ok(())
 }

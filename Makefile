@@ -1,12 +1,15 @@
 # End-to-end: run the backtest, then render its tearsheet.
 #
-#   make tearsheet            # fresh run, generated UUID-7
-#   make tearsheet UUID=<id>  # pin / re-render a specific run id
+#   make tearsheet                             # fresh run, generated UUID-7
+#   make tearsheet UUID=<id>                   # pin / re-render a specific run id
+#   make tearsheet ARGS="--lookback-months 6"  # pass extra flags to the binary
 #
 # Everything for a run is keyed by $(UUID):
 #   logs/<UUID>/logs.log
 #   runs/<UUID>/{config,legs,portfolio,fills}.csv
 #   runs/<UUID>/{tearsheet,legs}.html
+#
+# See `cargo run --bin xsectional-rs -- --help` for every knob.
 
 SHELL := bash
 .SHELLFLAGS := -o pipefail -c
@@ -22,9 +25,10 @@ UUID := $(UUID)
 tearsheet: backtest report
 
 ## Run the backtest binary, tee-ing its output to logs/<UUID>/logs.log.
+## Extra flags: make backtest ARGS="--percentile 0.2 --long-w 0.7"
 backtest:
 	@mkdir -p logs/$(UUID)
-	cargo run --bin xsectional-rs -- --uuid "$(UUID)" 2>&1 | tee logs/$(UUID)/logs.log
+	cargo run --bin xsectional-rs -- --uuid "$(UUID)" $(ARGS) 2>&1 | tee logs/$(UUID)/logs.log
 
 ## Render runs/<UUID>/{tearsheet,legs}.html from the captured CSVs.
 report:

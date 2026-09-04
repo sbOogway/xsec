@@ -64,13 +64,12 @@ pub async fn fetch_bars_cached(
 
     let bar_type = bar_type(instrument_id, aggregation);
     let path = cache_path(&instrument_id);
-    if let Ok(bytes) = fs::read(&path) {
-        if let Ok(bars) = rmp_serde::from_slice::<Vec<Bar>>(&bytes) {
-            if cache_is_fresh(&bars) {
-                println!("[data] cache hit: {instrument_id} ({} bars)", bars.len());
-                return Ok(bars);
-            }
-        }
+    if let Ok(bytes) = fs::read(&path)
+        && let Ok(bars) = rmp_serde::from_slice::<Vec<Bar>>(&bytes)
+        && cache_is_fresh(&bars)
+    {
+        println!("[data] cache hit: {instrument_id} ({} bars)", bars.len());
+        return Ok(bars);
     }
 
     println!("[data] fetching: {instrument_id}");

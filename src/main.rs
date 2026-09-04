@@ -2,11 +2,12 @@ use std::{collections::HashMap, fmt::Debug, str::FromStr, time::Duration};
 
 use anyhow::anyhow;
 use chrono::{DateTime, Datelike};
+use clap::Parser;
 use nautilus_common::{actor::DataActor, enums::Environment, timer::TimeEvent};
 use nautilus_core::UnixNanos;
 use nautilus_model::{
     data::{Bar, Data},
-    enums::{AccountType, BarAggregation, BookType, OmsType, OrderSide},
+    enums::{AccountType, BookType, OmsType, OrderSide},
     events::{OrderFilled, PositionOpened},
     identifiers::{InstrumentId, StrategyId, Venue},
     instruments::Instrument,
@@ -21,52 +22,19 @@ use nautilus_backtest::{
 };
 use nautilus_live::node::LiveNode;
 use rust_decimal::{Decimal, prelude::ToPrimitive};
-use uuid::Uuid;
 
 use xsectional_rs::{
-    capture::{RunCapture, RunConfig, YearMonth},
+    capture::{RunCapture, YearMonth},
+    config::{self, Cli, RunConfig},
     data,
     data::{bar_type, structure::BoundedQueue},
     sizing::{self, Conviction},
 };
 
-const VENUE: &str = "BYBIT";
-
+/// Which runtime to boot. The `Backtest` path is the one that is wired end to
+/// end; `Live` is a thin sketch and `Sandbox` is unimplemented. Everything
+/// else is configured per run through [`Cli`] / [`RunConfig`].
 const ENVIRONMENT: Environment = Environment::Backtest;
-const BASES: &[&str] = &[
-    "BTC", "ETH", "BNB", "XRP", "SOL", "TRX", "DOGE", "XMR", "LINK", "ADA", "XLM", "BCH", "LTC",
-    "UNI", "HBAR", "AVAX", "SUI", "CRO", "TAO", "NEAR", "OKB", "AAVE", "MNT", "ONDO", "ENA", "DOT",
-    "ICP", "MORPHO", "WLD", "ETC", "OP", "POL", "ALGO", "QNT", "ATOM", "KAS", "ARB", "RENDER",
-    "FIL", "CAKE", "CRV", "INJ", "STX", "TIA", "VET", "JUP", "HYPE", "ASTER", "ZEC", "CC", "GRAM",
-    "PYTH", "PUMPFUN", "1000PEPE", "EIGEN", "FLR", "IMX", "JST", "SEI", "XDC",
-    "JST", // "JST", "KITE", "FF", "GRAM", "LIT", "PENDLE", "LDO", "CFX", "XTZ", "JASMY", "TWT", "CVX",
-           // "ENS", "JTO", "WIF", "COMP", "STRK", "2Z", "KAIA", "IOTA", "ZBCN", "THETA", "AXS", "NEO",
-           // "CHZ", "EGLD", "APE", "AR", "MANA", "SAND", "BAT", "KSM", "DYDX", "GLM", "QTUM", "ZRX", "GMX",
-           // "ORCA", "KAITO", "COW", "SNX", "LPT", "NMR", "BR", "SUPER", "AIOZ", "ARC", "WAL", "ETHFI",
-           // "SSV",
-];
-const TIMEFRAME: BarAggregation = BarAggregation::Month;
-
-const HOLDING_MONTHS: u16 = 1;
-const LOOKBACK_MONTHS: u16 = 3;
-
-const PERCENTILE: &str = "0.1";
-
-/// Gross exposure target as a fraction of account equity, snapshotted from the
-/// simulated account at each rebalance. 1.0 = 100% gross (≈ `LONG_W` long +
-/// `1 - LONG_W` short).
-const RISK_PCT: f64 = 0.8;
-/// Share of the gross budget allocated to the long side; the short side gets
-/// the remainder. 0.5 = dollar-neutral.
-const LONG_W: f64 = 0.6;
-/// Within-side allocation tilt toward higher-conviction names. 0.0 = equal
-/// dollars per leg; larger leans capital onto the strongest signals.
-const SIGNAL_TILT: f64 = 0.0;
-
-const STARTING_BALANCE: &str = "1_000 USDT";
-
-const DATE_START: &str = "2020-01-01";
-const DATE_END: &str = "2026-09-02";
 
 #[derive(bon::Builder)]
 pub struct XSectionalMomentum {
@@ -77,14 +45,14 @@ pub struct XSectionalMomentum {
     }))]
     core: StrategyCore,
 
-    #[builder(default = BASES.into_iter().map(|base|{format!("{}USDT-LINEAR.BYBIT", base)}).map(InstrumentId::from).collect())]
+    /// The resolved run configuration (CLI flags + universe file). Every
+    /// strategy knob lives here; the capture layer serialises it to
+    /// `runs/<uuid>/config.csv`.
+    config: RunConfig,
+
+    /// Bybit instrument ids for `config.bases`, filled in `on_start`.
+    #[builder(skip)]
     instruments: Vec<InstrumentId>,
-
-    #[builder(default = HOLDING_MONTHS)]
-    holding_months: u16,
-
-    #[builder(default = LOOKBACK_MONTHS)]
-    lookback_months: u16,
 
     #[builder(default = 0)]
     last_month: u32,
@@ -94,10 +62,6 @@ pub struct XSectionalMomentum {
 
     #[builder(default)]
     returns: HashMap<InstrumentId, Decimal>,
-
-    /// The run UUID: keys `runs/<uuid>/` and matches `logs/<uuid>/logs.log`.
-    #[builder(default = Uuid::now_v7().to_string())]
-    run_id: String,
 
     /// Per-run artifact capture (`runs/<uuid>/{legs,portfolio,fills}.csv`).
     /// `None` until `on_start` opens the files.
@@ -120,40 +84,29 @@ nautilus_strategy!(XSectionalMomentum, {
 impl Debug for XSectionalMomentum {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("XSectionalMomentum")
-            .field("run_id", &self.run_id)
+            .field("config", &self.config)
             .field("core", &self.core)
             .field("instruments", &self.instruments)
-            .field("warmup_bars", &self.lookback_months)
             .finish()
     }
 }
 
 impl DataActor for XSectionalMomentum {
     fn on_start(&mut self) -> anyhow::Result<()> {
-        log::info!("run_id={}", self.run_id);
+        self.instruments = config::instrument_ids(&self.config.bases);
+
+        log::info!("run_id={}", self.config.run_id);
         log::info!("{:#?}", self);
 
-        if self.holding_months != 1 {
+        if self.config.holding_months != 1 {
             return Err(anyhow!(
                 "holding_months={} is not supported: the rebalance path assumes a one-month hold. \
                  Revisit the age-based close in on_time_event before changing this.",
-                self.holding_months
+                self.config.holding_months
             ));
         }
 
-        self.capture = Some(RunCapture::open(&RunConfig {
-            run_id: self.run_id.clone(),
-            lookback_months: self.lookback_months,
-            holding_months: self.holding_months,
-            percentile: PERCENTILE.to_string(),
-            date_start: DATE_START.to_string(),
-            date_end: DATE_END.to_string(),
-            bases: BASES.iter().map(|b| b.to_string()).collect(),
-            starting_balance: STARTING_BALANCE.to_string(),
-            risk_pct: RISK_PCT,
-            long_w: LONG_W,
-            signal_tilt: SIGNAL_TILT,
-        })?);
+        self.capture = Some(RunCapture::open(&self.config)?);
 
         self.clock().set_timer(
             "DAILY",
@@ -165,20 +118,21 @@ impl DataActor for XSectionalMomentum {
             None,
         )?;
 
-        let warmup = std::num::NonZeroUsize::new(self.lookback_months as usize)
-            .ok_or_else(|| anyhow!("warmup_bars must be > 0"))?;
+        let warmup = std::num::NonZeroUsize::new(self.config.lookback_months as usize)
+            .ok_or_else(|| anyhow!("lookback_months must be > 0"))?;
 
-        let symbols = self.instruments.clone();
-        for symbol in symbols {
-            let bar_type = bar_type(symbol, TIMEFRAME);
-            log::info!("[{}] requesting {warmup} warmup bars", symbol);
+        let instruments = self.instruments.clone();
+        for instrument in instruments {
+            let bar_type = bar_type(instrument, config::TIMEFRAME);
+            log::info!("[{}] requesting {warmup} warmup bars", instrument);
 
-            // let start = Some(UnixNanos::from_str("2024-01-01").unwrap());
             self.request_bars(bar_type, None, None, Some(warmup), None, None)?;
             self.subscribe_bars(bar_type, None, None);
 
-            self.prices
-                .insert(symbol, BoundedQueue::new(self.lookback_months.into()));
+            self.prices.insert(
+                instrument,
+                BoundedQueue::new(self.config.lookback_months.into()),
+            );
         }
 
         anyhow::Ok(())
@@ -218,7 +172,7 @@ impl DataActor for XSectionalMomentum {
         // hold would keep younger tranches open here.
         let open_positions = self.cache().positions_open(None, None, None, None, None);
         for position in open_positions {
-            let holding_ns = 27_u64 * self.holding_months as u64 * 86_400 * 1_000_000_000;
+            let holding_ns = 27_u64 * self.config.holding_months as u64 * 86_400 * 1_000_000_000;
             let age_ns = event
                 .ts_event
                 .as_u64()
@@ -230,7 +184,7 @@ impl DataActor for XSectionalMomentum {
 
         log::info!("hello from on_time_event {}", event);
         for instrument in &self.instruments {
-            let bar_type = bar_type(*instrument, TIMEFRAME);
+            let bar_type = bar_type(*instrument, config::TIMEFRAME);
             log::debug!("{} -> {:?}", instrument, self.cache().bar(&bar_type));
             log::debug!(
                 "{} -> {:#?}",
@@ -238,14 +192,14 @@ impl DataActor for XSectionalMomentum {
                 self.prices.get(instrument).unwrap().inner
             );
 
-            let price_lookback_months = self.prices.get(instrument).unwrap().inner.get(0);
+            let price_lookback_months = self.prices.get(instrument).unwrap().inner.front();
             let price_current = self
                 .prices
                 .get(instrument)
                 .unwrap()
                 .inner
-                .get((self.lookback_months - 1).into());
-            if price_current == None {
+                .get((self.config.lookback_months - 1).into());
+            if price_current.is_none() {
                 self.returns.remove(instrument);
                 continue;
             }
@@ -261,7 +215,8 @@ impl DataActor for XSectionalMomentum {
         let mut sorted_returns: Vec<(&InstrumentId, &Decimal)> = returns_clone.iter().collect();
         sorted_returns.sort_by_key(|&(_, v)| v);
 
-        let percentile_size = (Decimal::from_str(PERCENTILE).unwrap()
+        let percentile_size = (Decimal::from_str(&self.config.percentile)
+            .expect("percentile validated in build_config")
             * Decimal::from(sorted_returns.len()))
         .as_i128() as usize;
 
@@ -272,7 +227,10 @@ impl DataActor for XSectionalMomentum {
         log::info!("returns bottom {:#?}", percentile_bottom);
         log::info!("returns top {:#?}", percentile_top);
 
-        let account = self.cache().account_for_venue(&Venue::new(VENUE)).unwrap();
+        let account = self
+            .cache()
+            .account_for_venue(&Venue::new(config::VENUE))
+            .unwrap();
         let balances = account.balances();
 
         log::info!("balance {:#?}", balances);
@@ -283,8 +241,8 @@ impl DataActor for XSectionalMomentum {
         // Gross budget for this rebalance, split between the two sides. Sizing is
         // off the equity the account reports *now*, so the book compounds.
         let equity = self.usdt_equity();
-        let budget = RISK_PCT * equity.to_f64().unwrap_or(0.0);
-        let (long_budget, short_budget) = sizing::split_sides(budget, LONG_W);
+        let budget = self.config.risk_pct * equity.to_f64().unwrap_or(0.0);
+        let (long_budget, short_budget) = sizing::split_sides(budget, self.config.long_w);
 
         let short_signals: Vec<(InstrumentId, f64)> = percentile_bottom
             .iter()
@@ -295,16 +253,16 @@ impl DataActor for XSectionalMomentum {
             .map(|(i, r)| (**i, r.to_f64().unwrap_or(0.0)))
             .collect();
 
-        let allocation =
-            sizing::allocate(short_budget, &short_signals, SIGNAL_TILT, Conviction::Low)
-                .into_iter()
-                .map(|(id, n)| (id, OrderSide::Sell, n))
-                .chain(
-                    sizing::allocate(long_budget, &long_signals, SIGNAL_TILT, Conviction::High)
-                        .into_iter()
-                        .map(|(id, n)| (id, OrderSide::Buy, n)),
-                )
-                .collect::<Vec<_>>();
+        let tilt = self.config.signal_tilt;
+        let allocation = sizing::allocate(short_budget, &short_signals, tilt, Conviction::Low)
+            .into_iter()
+            .map(|(id, n)| (id, OrderSide::Sell, n))
+            .chain(
+                sizing::allocate(long_budget, &long_signals, tilt, Conviction::High)
+                    .into_iter()
+                    .map(|(id, n)| (id, OrderSide::Buy, n)),
+            )
+            .collect::<Vec<_>>();
 
         let net_notional: f64 = allocation
             .iter()
@@ -347,7 +305,7 @@ impl XSectionalMomentum {
     /// simulated venue, or zero if the account is not yet known.
     fn usdt_equity(&self) -> Decimal {
         self.portfolio()
-            .equity(&Venue::new(VENUE), None)
+            .equity(&Venue::new(config::VENUE), None)
             .iter()
             .find(|(currency, _)| currency.code.as_str() == "USDT")
             .map(|(_, money)| money.as_decimal())
@@ -376,7 +334,7 @@ impl XSectionalMomentum {
             log::warn!("no instrument cached for {instrument_id}, skipping");
             return false;
         };
-        let bar_type = bar_type(instrument_id, TIMEFRAME);
+        let bar_type = bar_type(instrument_id, config::TIMEFRAME);
         let Some(bar) = self
             .cache()
             .bar_at_index(&bar_type, 1)
@@ -421,74 +379,57 @@ impl XSectionalMomentum {
     }
 }
 
-/// Resolve the run UUID from `--uuid <X>` (or `--uuid=<X>`), falling back to a
-/// fresh UUID-7. Echoed on stdout so the caller can key `logs/<UUID>/logs.log`
-/// and the `runs/<UUID>/` files to the same id.
-fn resolve_run_id() -> String {
-    let mut args = std::env::args().skip(1);
-    while let Some(arg) = args.next() {
-        if let Some(value) = arg.strip_prefix("--uuid=") {
-            return value.to_string();
-        }
-        if arg == "--uuid"
-            && let Some(value) = args.next()
-        {
-            return value;
-        }
-    }
-    Uuid::now_v7().to_string()
-}
-
-fn main() {
+fn main() -> anyhow::Result<()> {
     nautilus_common::logging::ensure_logging_initialized();
 
-    let run_id = resolve_run_id();
-    println!("run_id={run_id}");
+    let cli = Cli::parse();
+    let argv: Vec<String> = std::env::args().collect();
+    let config = config::build_config(&cli, &argv)?;
+    // Echoed on stdout so the caller can key `logs/<uuid>/logs.log` and the
+    // `runs/<uuid>/` files to the same id.
+    println!("run_id={}", config.run_id);
 
     match ENVIRONMENT {
         Environment::Backtest => {
-            let mut engine = BacktestEngine::new(BacktestEngineConfig::default()).unwrap();
-            let strategy = XSectionalMomentum::builder().run_id(run_id).build();
+            let instrument_ids = config::instrument_ids(&config.bases);
+            let starting_balance = Money::from(config.starting_balance.as_str());
+            let start = Some(UnixNanos::from_str(&config.date_start).unwrap());
+            let end = Some(UnixNanos::from_str(&config.date_end).unwrap());
 
+            let mut engine = BacktestEngine::new(BacktestEngineConfig::default()).unwrap();
             engine
                 .add_venue(
                     SimulatedVenueConfig::builder()
-                        .venue(Venue::from("BYBIT"))
+                        .venue(Venue::from(config::VENUE))
                         .oms_type(OmsType::Hedging)
                         .account_type(AccountType::Margin)
                         .book_type(BookType::L1_MBP)
-                        .starting_balances(vec![Money::from(STARTING_BALANCE)])
+                        .starting_balances(vec![starting_balance])
                         .build()
                         .unwrap(),
                 )
                 .unwrap();
 
-            let symbols: Vec<InstrumentId> = BASES
-                .iter()
-                .map(|b| InstrumentId::from(format!("{b}USDT-LINEAR.BYBIT").as_str()))
-                .collect();
-
             let rt = tokio::runtime::Runtime::new().unwrap();
             let instruments = rt.block_on(data::fetch_linear_instruments()).unwrap();
             data::seed_instruments(&instruments);
             for inst in &instruments {
-                if symbols.contains(&inst.id()) {
+                if instrument_ids.contains(&inst.id()) {
                     engine.add_instrument(inst).unwrap();
                 }
             }
-            for id in &symbols {
+            for id in &instrument_ids {
                 let bars = rt
-                    .block_on(data::fetch_bars_cached(*id, TIMEFRAME))
+                    .block_on(data::fetch_bars_cached(*id, config::TIMEFRAME))
                     .unwrap();
                 log::info!("loaded {} bars for {}", bars.len(), id);
                 engine
                     .add_data(bars.into_iter().map(Data::Bar).collect(), None, false, true)
                     .unwrap();
             }
-            engine.add_strategy(strategy).unwrap();
 
-            let start = Some(UnixNanos::from_str(DATE_START).unwrap());
-            let end = Some(UnixNanos::from_str(DATE_END).unwrap());
+            let strategy = XSectionalMomentum::builder().config(config).build();
+            engine.add_strategy(strategy).unwrap();
             engine.run(start, end, None, false).unwrap();
         }
         Environment::Sandbox => todo!(),
@@ -500,14 +441,14 @@ fn main() {
             use nautilus_common::factories::ClientConfig;
             use nautilus_model::identifiers::TraderId;
 
-            let strategy = XSectionalMomentum::builder().run_id(run_id).build();
+            let strategy = XSectionalMomentum::builder().config(config).build();
 
-            let config = BybitDataClientConfig {
+            let data_config = BybitDataClientConfig {
                 product_types: vec![BybitProductType::Linear],
                 ..Default::default()
             };
             let factory = BybitDataClientFactory::new();
-            let cfg: Box<dyn ClientConfig> = Box::new(config);
+            let cfg: Box<dyn ClientConfig> = Box::new(data_config);
 
             let rt = tokio::runtime::Runtime::new().unwrap();
             rt.block_on(async {
@@ -522,4 +463,6 @@ fn main() {
             .unwrap();
         }
     }
+
+    Ok(())
 }

@@ -66,6 +66,8 @@ fn capture_writes_the_contract() {
         risk_pct: 1.0,
         long_w: 0.5,
         signal_tilt: 0.0,
+        universe_path: "universe.txt".to_string(),
+        argv: "xsectional-rs --uuid test-0000-run".to_string(),
     };
 
     let mut capture = RunCapture::open_in(dir.path(), &cfg).unwrap();
@@ -123,6 +125,8 @@ fn capture_writes_the_contract() {
     assert_eq!(cfg_map["lookback_months"], "3");
     assert_eq!(cfg_map["holding_months"], "1");
     assert_eq!(cfg_map["bases"], "BTC ETH");
+    assert_eq!(cfg_map["universe_path"], "universe.txt");
+    assert_eq!(cfg_map["argv"], "xsectional-rs --uuid test-0000-run");
 
     // --- legs schema: month label, side vocabulary, 6dp returns ---
     for row in &legs.rows {
