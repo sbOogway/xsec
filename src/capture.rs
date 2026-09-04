@@ -74,8 +74,9 @@ impl YearMonth {
     }
 }
 
-/// The strategy configuration, written verbatim to `<UUID>/config.csv` so a
-/// tearsheet (or a human) can label a run without re-reading the source.
+/// The shared run configuration, written to `<UUID>/config.csv` (with the
+/// strategy's own rows appended) so a tearsheet — or a human — can label a run
+/// without re-reading the source.
 ///
 /// Defined in [`crate::config`] (it is also the strategy's runtime input) and
 /// re-exported here for the capture API.
@@ -112,14 +113,19 @@ pub struct RunCapture {
 impl RunCapture {
     /// Open (append mode) the four run files under `runs/<run_id>/`, writing
     /// headers to any that are new, and (re)write the config sidecar. Creates
-    /// the run directory on demand.
-    pub fn open(cfg: &RunConfig) -> Result<Self> {
-        Self::open_in(Path::new(RUN_DIR), cfg)
+    /// the run directory on demand. `strategy_rows` are the running strategy's
+    /// own `key,value` pairs, appended to the shared rows in `config.csv`.
+    pub fn open(cfg: &RunConfig, strategy_rows: &[(String, String)]) -> Result<Self> {
+        Self::open_in(Path::new(RUN_DIR), cfg, strategy_rows)
     }
 
     /// As [`open`](Self::open), but rooted at `base_dir` instead of `runs/`.
     /// The per-run files land in `base_dir/<run_id>/`.
-    pub fn open_in(base_dir: &Path, cfg: &RunConfig) -> Result<Self> {
+    pub fn open_in(
+        base_dir: &Path,
+        cfg: &RunConfig,
+        strategy_rows: &[(String, String)],
+    ) -> Result<Self> {
         let dir = base_dir.join(&cfg.run_id);
         fs::create_dir_all(&dir).with_context(|| format!("create {}", dir.display()))?;
 
@@ -131,7 +137,7 @@ impl RunCapture {
         let portfolio = open_appending(&portfolio_path, PORTFOLIO_HEADER)?;
         let fills = open_appending(&fills_path, FILLS_HEADER)?;
 
-        write_config(&dir.join("config.csv"), cfg)?;
+        write_config(&dir.join("config.csv"), cfg, strategy_rows)?;
 
         Ok(Self {
             run_id: cfg.run_id.clone(),
@@ -345,24 +351,22 @@ fn open_appending(path: &Path, header: &str) -> Result<BufWriter<File>> {
     Ok(writer)
 }
 
-fn write_config(path: &Path, cfg: &RunConfig) -> Result<()> {
+fn write_config(path: &Path, cfg: &RunConfig, strategy_rows: &[(String, String)]) -> Result<()> {
     let generated_at = Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
     let mut w = BufWriter::new(File::create(path).with_context(|| format!("create {}", path.display()))?);
     writeln!(w, "key,value")?;
     writeln!(w, "run_id,{}", cfg.run_id)?;
     writeln!(w, "generated_at,{generated_at}")?;
-    writeln!(w, "lookback_months,{}", cfg.lookback_months)?;
-    writeln!(w, "holding_months,{}", cfg.holding_months)?;
-    writeln!(w, "percentile,{}", cfg.percentile)?;
+    writeln!(w, "strategy,{}", cfg.strategy)?;
     writeln!(w, "date_start,{}", cfg.date_start)?;
     writeln!(w, "date_end,{}", cfg.date_end)?;
-    writeln!(w, "risk_pct,{}", cfg.risk_pct)?;
-    writeln!(w, "long_w,{}", cfg.long_w)?;
-    writeln!(w, "signal_tilt,{}", cfg.signal_tilt)?;
     writeln!(w, "starting_balance,{}", cfg.starting_balance)?;
     writeln!(w, "bases,{}", cfg.bases.join(" "))?;
     writeln!(w, "universe_path,{}", cfg.universe_path)?;
     writeln!(w, "argv,{}", cfg.argv)?;
+    for (key, value) in strategy_rows {
+        writeln!(w, "{key},{value}")?;
+    }
     w.flush()?;
     Ok(())
 }

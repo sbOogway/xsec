@@ -56,21 +56,26 @@ fn capture_writes_the_contract() {
 
     let cfg = RunConfig {
         run_id: RUN_ID.to_string(),
-        lookback_months: 3,
-        holding_months: 1,
-        percentile: "0.1".to_string(),
+        strategy: "cross_sectional_momentum".to_string(),
         date_start: "2025-01-01".to_string(),
         date_end: "2025-07-01".to_string(),
         bases: vec!["BTC".to_string(), "ETH".to_string()],
         starting_balance: "1000 USDT".to_string(),
-        risk_pct: 1.0,
-        long_w: 0.5,
-        signal_tilt: 0.0,
         universe_path: "universe.txt".to_string(),
         argv: "xsectional-rs --uuid test-0000-run".to_string(),
     };
+    // The rows the momentum strategy contributes (see
+    // `strategy::momentum::config::config_rows`).
+    let strategy_rows = [
+        ("lookback_months".to_string(), "3".to_string()),
+        ("holding_months".to_string(), "1".to_string()),
+        ("percentile".to_string(), "0.1".to_string()),
+        ("risk_pct".to_string(), "1".to_string()),
+        ("long_w".to_string(), "0.5".to_string()),
+        ("signal_tilt".to_string(), "0".to_string()),
+    ];
 
-    let mut capture = RunCapture::open_in(dir.path(), &cfg).unwrap();
+    let mut capture = RunCapture::open_in(dir.path(), &cfg, &strategy_rows).unwrap();
 
     // Exit mark for every leg: long +10%, short instrument -10% (=> short leg +10%).
     let mut exits: HashMap<InstrumentId, Decimal> = HashMap::new();
@@ -122,6 +127,7 @@ fn capture_writes_the_contract() {
         .map(|r| (r[0].as_str(), r[1].as_str()))
         .collect();
     assert_eq!(cfg_map["run_id"], RUN_ID);
+    assert_eq!(cfg_map["strategy"], "cross_sectional_momentum");
     assert_eq!(cfg_map["lookback_months"], "3");
     assert_eq!(cfg_map["holding_months"], "1");
     assert_eq!(cfg_map["bases"], "BTC ETH");
