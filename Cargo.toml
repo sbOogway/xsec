@@ -1,5 +1,5 @@
 [package]
-name = "xsectional-rs"
+name = "xsec"
 version = "0.1.0"
 edition = "2024"
 
@@ -13,6 +13,7 @@ nautilus-backtest = { version = "0.61" }
 nautilus-live = { version = "0.61" }
 bon = "3.10.0"
 anyhow = "1.0.104"
+clap = { version = "4.6", features = ["derive"] }
 tokio = { version = "1.53.1", features = ["rt-multi-thread", "macros"] }
 chrono = "0.4.45"
 rmp-serde = "1"

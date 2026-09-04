@@ -1,0 +1,74 @@
+# Cross-sectional momentum universe: Bybit USDT-margined linear perpetuals.
+#
+# One base asset per line. Blank lines and lines starting with `#` are ignored;
+# an inline `# ...` after a symbol is stripped. Symbols are upper-cased and
+# de-duplicated (first occurrence wins). Each `SYM` here is traded as the
+# instrument `SYMUSDT-LINEAR.BYBIT`.
+#
+# Override the path with `--universe <file>`.
+
+BTC
+ETH
+BNB
+XRP
+SOL
+TRX
+DOGE
+XMR
+LINK
+ADA
+XLM
+BCH
+LTC
+UNI
+HBAR
+AVAX
+SUI
+CRO
+TAO
+NEAR
+OKB
+AAVE
+MNT
+ONDO
+ENA
+DOT
+ICP
+MORPHO
+WLD
+ETC
+OP
+POL
+ALGO
+QNT
+ATOM
+KAS
+ARB
+RENDER
+FIL
+CAKE
+CRV
+INJ
+STX
+TIA
+VET
+JUP
+HYPE
+ASTER
+ZEC
+CC
+GRAM
+PYTH
+PUMPFUN
+1000PEPE
+EIGEN
+FLR
+IMX
+JST
+SEI
+XDC
+
+# --- Not currently traded (uncomment to add back) ---
+# KITE FF LIT PENDLE LDO CFX XTZ JASMY TWT CVX ENS JTO WIF COMP STRK 2Z KAIA
+# IOTA ZBCN THETA AXS NEO CHZ EGLD APE AR MANA SAND BAT KSM DYDX GLM QTUM ZRX
+# GMX ORCA KAITO COW SNX LPT NMR BR SUPER AIOZ ARC WAL ETHFI SSV

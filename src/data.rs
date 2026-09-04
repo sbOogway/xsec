@@ -13,7 +13,7 @@ use nautilus_model::{
 const DATA_DIR: &str = "data";
 const STALE_AFTER_HOURS: i64 = 24;
 
-pub fn bar_type(instrument_id: InstrumentId, aggregation: BarAggregation) -> BarType {
+pub fn get_bar_type(instrument_id: InstrumentId, aggregation: BarAggregation) -> BarType {
     BarType::new(
         instrument_id,
         BarSpecification::new(1, aggregation, PriceType::Last),
@@ -62,15 +62,14 @@ pub async fn fetch_bars_cached(
 ) -> Result<Vec<Bar>> {
     fs::create_dir_all(DATA_DIR).ok();
 
-    let bar_type = bar_type(instrument_id, aggregation);
+    let bar_type = get_bar_type(instrument_id, aggregation);
     let path = cache_path(&instrument_id);
-    if let Ok(bytes) = fs::read(&path) {
-        if let Ok(bars) = rmp_serde::from_slice::<Vec<Bar>>(&bytes) {
-            if cache_is_fresh(&bars) {
-                println!("[data] cache hit: {instrument_id} ({} bars)", bars.len());
-                return Ok(bars);
-            }
-        }
+    if let Ok(bytes) = fs::read(&path)
+        && let Ok(bars) = rmp_serde::from_slice::<Vec<Bar>>(&bytes)
+        && cache_is_fresh(&bars)
+    {
+        println!("[data] cache hit: {instrument_id} ({} bars)", bars.len());
+        return Ok(bars);
     }
 
     println!("[data] fetching: {instrument_id}");

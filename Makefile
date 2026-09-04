@@ -1,12 +1,17 @@
 # End-to-end: run the backtest, then render its tearsheet.
 #
-#   make tearsheet            # fresh run, generated UUID-7
-#   make tearsheet UUID=<id>  # pin / re-render a specific run id
+#   make tearsheet                             # fresh run, generated UUID-7
+#   make tearsheet UUID=<id>                   # pin / re-render a specific run id
+#   make tearsheet ARGS="--lookback-months 6"  # pass extra flags to the strategy
+#   make tearsheet STRATEGY=momentum           # pick a strategy (this is the default)
 #
 # Everything for a run is keyed by $(UUID):
 #   logs/<UUID>/logs.log
 #   runs/<UUID>/{config,legs,portfolio,fills}.csv
 #   runs/<UUID>/{tearsheet,legs}.html
+#
+# See `cargo run --bin xsec -- --help` for the strategy list and
+# `cargo run --bin xsec -- $(STRATEGY) --help` for its knobs.
 
 SHELL := bash
 .SHELLFLAGS := -o pipefail -c
@@ -16,15 +21,20 @@ SHELL := bash
 UUID ?= $(shell uuidgen -7 2>/dev/null || uuidgen)
 UUID := $(UUID)
 
+# Which strategy subcommand to run. Every strategy shares the run-level flags
+# (--uuid, --universe, --date-*, --starting-balance).
+STRATEGY ?= momentum
+
 .PHONY: tearsheet backtest report
 
 ## Run the backtest and build the tearsheet for $(UUID).
 tearsheet: backtest report
 
 ## Run the backtest binary, tee-ing its output to logs/<UUID>/logs.log.
+## Extra flags: make backtest ARGS="--percentile 0.2 --long-w 0.7"
 backtest:
 	@mkdir -p logs/$(UUID)
-	cargo run --bin xsectional-rs -- --uuid "$(UUID)" 2>&1 | tee logs/$(UUID)/logs.log
+	cargo run --bin xsec -- --uuid "$(UUID)" $(STRATEGY) $(ARGS) 2>&1 | tee logs/$(UUID)/logs.log
 
 ## Render runs/<UUID>/{tearsheet,legs}.html from the captured CSVs.
 report:
