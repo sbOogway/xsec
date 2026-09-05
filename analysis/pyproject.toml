@@ -12,6 +12,7 @@ dependencies = [
     # legs.py renders its charts directly; quantstats pulls matplotlib in too,
     # but pin it here so the per-leg report doesn't ride on a transitive dep.
     "matplotlib==3.11.1",
+    "optuna==4.9.0",
 ]
 
 [dependency-groups]

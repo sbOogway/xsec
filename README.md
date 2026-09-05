@@ -73,6 +73,19 @@ lines starting with `#` are ignored, as is an inline `# …` after a symbol;
 symbols are upper-cased and de-duplicated. Point `--universe` at another file to
 run a different basket without touching the default.
 
+## Parameter search
+
+```sh
+make optimize                                 # Optuna search, 50 trials, defaults
+make optimize OPT_ARGS="--n-trials 200"
+```
+
+`analysis/optimize.py` runs an Optuna search over `momentum`'s flags, splitting
+the backtest window chronologically into in-sample (drives the search) and
+out-of-sample (validates the best trial once, after the fact) so the search
+can't just overfit the whole window. See
+[`analysis/README.md`](analysis/README.md#parameter-search-optimizepy).
+
 ## Artifacts
 
 Everything for a run lives under a per-UUID directory:
@@ -86,6 +99,8 @@ Everything for a run lives under a per-UUID directory:
 | `runs/<UUID>/fills.csv`         | one row per `OrderFilled` event (fill price, quantity, fee) |
 | `runs/<UUID>/tearsheet.html`    | the QuantStats tearsheet (self-contained; open in any browser) |
 | `runs/<UUID>/legs.html`         | the per-leg diagnostics report (self-contained; open in any browser) |
+| `runs/optuna/<study-name>.db`   | an Optuna study (sqlite); every trial is also a normal `runs/<trial-uuid>/` |
+| `runs/optuna/<study-name>.json` | best-trial params + in-sample/out-of-sample CAGR from `make optimize` |
 
 `runs/` is per-machine, regenerable state — gitignored, like `target/`. The
 source-of-truth record of a run is its log.
