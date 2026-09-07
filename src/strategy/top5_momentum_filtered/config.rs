@@ -212,7 +212,7 @@ mod tests {
         bases
     }
 
-    /// Parse top5-momentum flags (no program name, no subcommand) into [`Args`].
+    /// Parse top5-momentum-filtered flags (no program name, no subcommand) into [`Args`].
     fn args(extra: &[&str]) -> Args {
         use clap::Parser;
 
@@ -222,7 +222,7 @@ mod tests {
             args: Args,
         }
 
-        let mut full = vec!["top5-momentum"];
+        let mut full = vec!["top5-momentum-filtered"];
         full.extend_from_slice(extra);
         Wrap::try_parse_from(full).expect("args parse").args
     }

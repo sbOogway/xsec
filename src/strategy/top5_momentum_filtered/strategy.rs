@@ -20,9 +20,9 @@ use crate::{
 use super::config::{self, Config};
 
 #[derive(bon::Builder)]
-pub struct Top5Momentum {
+pub struct Top5MomentumFiltered {
     #[builder(default = StrategyCore::new(StrategyConfig {
-         strategy_id: Some(StrategyId::from("TOP5-MOM")),
+         strategy_id: Some(StrategyId::from("TOP5-MOM-FILTERED")),
          order_id_tag: Some("001".to_string()),
          ..Default::default()
     }))]
@@ -40,9 +40,9 @@ pub struct Top5Momentum {
     runtime: RuntimeState<IsoWeek>,
 }
 
-nautilus_strategy!(Top5Momentum);
+nautilus_strategy!(Top5MomentumFiltered);
 
-impl StrategyRuntime for Top5Momentum {
+impl StrategyRuntime for Top5MomentumFiltered {
     type Period = IsoWeek;
 
     fn runtime(&self) -> &RuntimeState<IsoWeek> {
@@ -56,9 +56,9 @@ impl StrategyRuntime for Top5Momentum {
     }
 }
 
-impl Debug for Top5Momentum {
+impl Debug for Top5MomentumFiltered {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Top5Momentum")
+        f.debug_struct("Top5MomentumFiltered")
             .field("run", &self.run)
             .field("config", &self.config)
             .field("core", &self.core)
@@ -67,7 +67,7 @@ impl Debug for Top5Momentum {
     }
 }
 
-impl DataActor for Top5Momentum {
+impl DataActor for Top5MomentumFiltered {
     fn on_start(&mut self) -> anyhow::Result<()> {
         anyhow::Ok(())
     }
