@@ -43,7 +43,8 @@ use crate::{
 /// handle. Populated in `on_start`.
 ///
 /// Generic over the strategy's own rebalance period type `P` (a calendar
-/// month, an ISO week, ...) — see [`crate::period::RebalancePeriod`].
+/// month, a calendar day, an ISO week, ...) — see
+/// [`crate::period::RebalancePeriod`].
 pub struct RuntimeState<P: RebalancePeriod> {
     /// Instrument ids for the run's universe, resolved in `on_start`.
     pub instruments: Vec<InstrumentId>,
@@ -114,7 +115,8 @@ impl Market {
 pub trait StrategyRuntime:
     Strategy + StrategyNative + DataActorNative + Debug + Sized + 'static
 {
-    /// This strategy's rebalance cadence (a calendar month, an ISO week, ...).
+    /// This strategy's rebalance cadence (a calendar month, a calendar day, an
+    /// ISO week, ...).
     /// Also the join key `RunCapture` groups `legs.csv` / `portfolio.csv` rows
     /// by — one declaration drives both the clock and the capture schema.
     type Period: RebalancePeriod;

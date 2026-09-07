@@ -13,7 +13,7 @@ use crate::strategy::common::Market;
 /// and nothing else.
 pub const VENUE: &str = "BYBIT";
 
-/// Bar size the strategy ranks on: daily bars, rebalanced weekly.
+/// Bar size the strategy ranks on: daily bars, rebalanced daily.
 pub const TIMEFRAME: BarAggregation = BarAggregation::Day;
 
 /// The market this strategy trades, for [`crate::strategy::common::StrategyRuntime`].
@@ -50,7 +50,7 @@ pub struct Args {
     #[arg(long, default_value_t = 0.5)]
     pub slow_weight: f64,
 
-    /// Number of names held long each week.
+    /// Number of names held long each day.
     #[arg(long, default_value_t = 5)]
     pub top_n: usize,
 
@@ -68,9 +68,9 @@ pub struct Args {
     #[arg(long, default_value_t = 0.0)]
     pub allocation_tilt: f64,
 
-    /// Holding period, in weeks. Only `1` is currently supported.
+    /// Holding period, in days. Only `1` is currently supported.
     #[arg(long, default_value_t = 1)]
-    pub holding_weeks: u16,
+    pub holding_days: u16,
 }
 
 /// The resolved, validated top-5 momentum configuration the strategy holds.
@@ -88,7 +88,7 @@ pub struct Config {
     pub risk_fraction: f64,
     /// Within-book allocation tilt toward higher-conviction names (0 = equal).
     pub allocation_tilt: f64,
-    pub holding_weeks: u16,
+    pub holding_days: u16,
 }
 
 /// Validate a parsed [`Args`] against the traded universe and resolve it into
@@ -146,9 +146,9 @@ pub fn build(args: &Args, bases: &[String]) -> Result<Config> {
     );
 
     ensure!(
-        args.holding_weeks == 1,
-        "--holding-weeks={} is not supported: the rebalance path assumes a one-week hold",
-        args.holding_weeks
+        args.holding_days == 1,
+        "--holding-days={} is not supported: the rebalance path assumes a one-day hold",
+        args.holding_days
     );
 
     ensure!(
@@ -167,7 +167,7 @@ pub fn build(args: &Args, bases: &[String]) -> Result<Config> {
         regime_lookback_days: args.regime_lookback_days,
         risk_fraction: args.risk_fraction,
         allocation_tilt: args.allocation_tilt,
-        holding_weeks: args.holding_weeks,
+        holding_days: args.holding_days,
     })
 }
 
@@ -188,7 +188,7 @@ pub fn config_rows(cfg: &Config) -> Vec<(String, String)> {
         ),
         ("risk_fraction".to_string(), cfg.risk_fraction.to_string()),
         ("allocation_tilt".to_string(), cfg.allocation_tilt.to_string()),
-        ("holding_weeks".to_string(), cfg.holding_weeks.to_string()),
+        ("holding_days".to_string(), cfg.holding_days.to_string()),
     ]
 }
 
@@ -240,7 +240,7 @@ mod tests {
         assert_eq!(cfg.regime_lookback_days, 20);
         assert_eq!(cfg.risk_fraction, 0.8);
         assert_eq!(cfg.allocation_tilt, 0.0);
-        assert_eq!(cfg.holding_weeks, 1);
+        assert_eq!(cfg.holding_days, 1);
     }
 
     #[test]
@@ -306,11 +306,11 @@ mod tests {
     }
 
     #[test]
-    fn rejects_multi_week_hold() {
-        let err = build(&args(&["--holding-weeks", "2"]), &bases(20))
+    fn rejects_multi_day_hold() {
+        let err = build(&args(&["--holding-days", "2"]), &bases(20))
             .unwrap_err()
             .to_string();
-        assert!(err.contains("one-week hold"), "{err}");
+        assert!(err.contains("one-day hold"), "{err}");
     }
 
     #[test]

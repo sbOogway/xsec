@@ -1,5 +1,5 @@
 //! The top-5 momentum strategy: rank the universe by a composite fast/medium/
-//! slow momentum score, go long the top names, hold a week, repeat —
+//! slow momentum score, go long the top names, hold a day, repeat —
 //! flattening to cash whenever BTC's trend regime filter is negative.
 //! Everything that is not the signal — the rebalance clock, the price
 //! buffers, artifact capture, notional-sized orders — comes from
@@ -19,7 +19,7 @@ use rust_decimal::{Decimal, prelude::ToPrimitive};
 
 use crate::{
     config::RunConfig,
-    period::IsoWeek,
+    period::CalendarDay,
     sizing::{self, Conviction},
     strategy::common::{Market, RuntimeState, StrategyRuntime, btc_instrument_id, n_day_return},
 };
@@ -44,7 +44,7 @@ pub struct Top5MomentumFiltered {
     /// Signal-agnostic backtest state: universe ids, rebalance clock, rolling
     /// price buffers, capture handle. Filled in `on_start`.
     #[builder(skip)]
-    runtime: RuntimeState<IsoWeek>,
+    runtime: RuntimeState<CalendarDay>,
 
     /// `BTC`'s instrument id, resolved once in `on_start` for the regime
     /// filter.
@@ -59,12 +59,12 @@ nautilus_strategy!(Top5MomentumFiltered, {
 });
 
 impl StrategyRuntime for Top5MomentumFiltered {
-    type Period = IsoWeek;
+    type Period = CalendarDay;
 
-    fn runtime(&self) -> &RuntimeState<IsoWeek> {
+    fn runtime(&self) -> &RuntimeState<CalendarDay> {
         &self.runtime
     }
-    fn runtime_mut(&mut self) -> &mut RuntimeState<IsoWeek> {
+    fn runtime_mut(&mut self) -> &mut RuntimeState<CalendarDay> {
         &mut self.runtime
     }
     fn market(&self) -> Market {
@@ -86,11 +86,11 @@ impl Debug for Top5MomentumFiltered {
 impl DataActor for Top5MomentumFiltered {
     fn on_start(&mut self) -> anyhow::Result<()> {
         // Defense in depth: `config::build` already rejects this, but the
-        // rebalance path below assumes a one-week hold.
-        if self.config.holding_weeks != 1 {
+        // rebalance path below assumes a one-day hold.
+        if self.config.holding_days != 1 {
             return Err(anyhow::anyhow!(
-                "holding_weeks={} is not supported: the rebalance path assumes a one-week hold",
-                self.config.holding_weeks
+                "holding_days={} is not supported: the rebalance path assumes a one-day hold",
+                self.config.holding_days
             ));
         }
 
@@ -149,13 +149,13 @@ impl DataActor for Top5MomentumFiltered {
             return anyhow::Ok(());
         }
 
-        // `close_expired` ages out on a strict `>`, and rebalances land
-        // exactly `holding_weeks * 7` days apart, so last week's legs would
-        // never be strictly older than that gap. A day's cushion (mirroring
-        // momentum's 27-vs-30-day gap) ensures they clear before this week's
-        // legs are opened.
-        let holding_days = 7_u64 * self.config.holding_weeks as u64 - 1;
-        self.close_expired(event, holding_days);
+        // `close_expired` ages out on a strict `>`, and daily rebalances land
+        // exactly one day apart, so yesterday's legs would never be strictly
+        // older than a full `holding_days`. A day's cushion (mirroring
+        // momentum's 27-vs-30-day gap) ensures they clear before today's legs
+        // are opened.
+        let max_age_days = self.config.holding_days as u64 - 1;
+        self.close_expired(event, max_age_days);
 
         // --- signal: composite fast/medium/slow momentum score, per name ---
         let instruments = self.runtime().instruments.clone();
@@ -179,7 +179,7 @@ impl DataActor for Top5MomentumFiltered {
         scores.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
         scores.truncate(self.config.top_n);
 
-        log::info!("scores this week {scores:#?}");
+        log::info!("scores today {scores:#?}");
 
         let budget = self.config.risk_fraction * equity.to_f64().unwrap_or(0.0);
         let allocation = sizing::allocate(

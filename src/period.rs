@@ -3,11 +3,11 @@
 //! the run-artifact capture layer ([`crate::capture`]).
 //!
 //! A period is whatever a strategy rebalances on — a calendar month
-//! ([`YearMonth`]) for `momentum`, an ISO week ([`IsoWeek`]) for a
-//! weekly-cadence strategy. Both the rebalance-clock guard and the
-//! `legs.csv` / `portfolio.csv` join key derive from the same value via
-//! [`RebalancePeriod`], so there is exactly one definition of "what period is
-//! this" per strategy, not two independent ones.
+//! ([`YearMonth`]) for `momentum`, a single calendar day ([`CalendarDay`]) for
+//! a daily-cadence strategy, an ISO week ([`IsoWeek`]) for a weekly one. Both
+//! the rebalance-clock guard and the `legs.csv` / `portfolio.csv` join key
+//! derive from the same value via [`RebalancePeriod`], so there is exactly one
+//! definition of "what period is this" per strategy, not two independent ones.
 
 use chrono::{DateTime, Datelike, NaiveDate, Utc, Weekday};
 
@@ -76,6 +76,37 @@ impl RebalancePeriod for YearMonth {
                 year: self.year,
                 month: self.month + 1,
             }
+        }
+    }
+}
+
+/// A single calendar day in UTC. The rebalance period for a daily-cadence
+/// strategy — every `"DAILY"` engine-timer fire rolls it, so the whole book
+/// turns over each day.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
+pub struct CalendarDay {
+    pub date: NaiveDate,
+}
+
+impl RebalancePeriod for CalendarDay {
+    fn from_nanos(ts_event: u64) -> Self {
+        let dt = DateTime::<Utc>::from_timestamp_nanos(ts_event as i64);
+        Self {
+            date: dt.date_naive(),
+        }
+    }
+
+    fn label(&self) -> String {
+        self.date.format("%Y-%m-%d").to_string()
+    }
+
+    fn end_date(&self) -> NaiveDate {
+        self.date
+    }
+
+    fn next(&self) -> Self {
+        Self {
+            date: self.date.succ_opt().expect("valid calendar date"),
         }
     }
 }
@@ -194,6 +225,39 @@ mod tests {
                 year: 2026,
                 week: 3
             }
+        );
+    }
+
+    fn day(year: i32, month: u32, date: u32) -> CalendarDay {
+        CalendarDay {
+            date: NaiveDate::from_ymd_opt(year, month, date).unwrap(),
+        }
+    }
+
+    #[test]
+    fn calendar_day_next_wraps_month_and_year() {
+        assert_eq!(day(2026, 1, 31).next(), day(2026, 2, 1));
+        assert_eq!(day(2025, 12, 31).next(), day(2026, 1, 1));
+        // 2028 is a leap year: February has a 29th.
+        assert_eq!(day(2028, 2, 28).next(), day(2028, 2, 29));
+    }
+
+    #[test]
+    fn calendar_day_label_and_end_date() {
+        let d = day(2026, 1, 12);
+        assert_eq!(d.label(), "2026-01-12");
+        // A day's period ends on the day itself.
+        assert_eq!(d.end_date(), NaiveDate::from_ymd_opt(2026, 1, 12).unwrap());
+    }
+
+    #[test]
+    fn calendar_day_from_nanos_takes_the_utc_date() {
+        // 2026-01-12T00:00:00Z, and one nanosecond before midnight the next day.
+        let midnight = 1_768_176_000_000_000_000u64;
+        assert_eq!(CalendarDay::from_nanos(midnight), day(2026, 1, 12));
+        assert_eq!(
+            CalendarDay::from_nanos(midnight + 86_400 * 1_000_000_000 - 1),
+            day(2026, 1, 12)
         );
     }
 }

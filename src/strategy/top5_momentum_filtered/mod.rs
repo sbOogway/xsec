@@ -1,5 +1,5 @@
 //! Long-only top-5 composite-momentum strategy over Bybit USDT-margined linear
-//! perpetuals, rebalanced weekly with a BTC trend regime filter.
+//! perpetuals, rebalanced daily with a BTC trend regime filter.
 //!
 //! [`config`] owns the knobs and the market; [`strategy`] owns the ranking and
 //! the budget split — everything else comes from [`crate::strategy::common`].
