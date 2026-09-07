@@ -7,7 +7,7 @@ use anyhow::{Result, ensure};
 use clap::Args as ClapArgs;
 use nautilus_model::{enums::BarAggregation, identifiers::InstrumentId};
 
-use crate::strategy::runtime::Market;
+use crate::strategy::common::Market;
 
 /// The trading venue. Bybit-only: the data layer talks to the Bybit HTTP API
 /// and nothing else.
@@ -16,7 +16,7 @@ pub const VENUE: &str = "BYBIT";
 /// Bar size the strategy ranks on: daily bars, rebalanced weekly.
 pub const TIMEFRAME: BarAggregation = BarAggregation::Day;
 
-/// The market this strategy trades, for [`crate::strategy::runtime::StrategyRuntime`].
+/// The market this strategy trades, for [`crate::strategy::common::StrategyRuntime`].
 pub const MARKET: Market = Market {
     venue: VENUE,
     timeframe: TIMEFRAME,

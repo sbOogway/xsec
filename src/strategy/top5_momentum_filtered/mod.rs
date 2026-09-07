@@ -2,7 +2,7 @@
 //! perpetuals, rebalanced weekly with a BTC trend regime filter.
 //!
 //! [`config`] owns the knobs and the market; [`strategy`] owns the ranking and
-//! the budget split — everything else comes from [`crate::strategy::runtime`].
+//! the budget split — everything else comes from [`crate::strategy::common`].
 
 pub mod config;
 pub mod strategy;

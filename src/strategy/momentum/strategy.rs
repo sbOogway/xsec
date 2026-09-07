@@ -2,7 +2,7 @@
 //! go long the top `percentile` and short the bottom `percentile`, hold a
 //! month, repeat. Everything that is not the signal — the rebalance clock, the
 //! price buffers, artifact capture, notional-sized orders — comes from
-//! [`crate::strategy::runtime::StrategyRuntime`].
+//! [`crate::strategy::common::StrategyRuntime`].
 
 use std::{collections::HashMap, fmt::Debug, str::FromStr};
 
@@ -20,7 +20,7 @@ use crate::{
     config::RunConfig,
     period::{RebalancePeriod, YearMonth},
     sizing::{self, Conviction},
-    strategy::runtime::{Market, RuntimeState, StrategyRuntime},
+    strategy::common::{Market, RuntimeState, StrategyRuntime},
 };
 
 use super::config::{self, Config};

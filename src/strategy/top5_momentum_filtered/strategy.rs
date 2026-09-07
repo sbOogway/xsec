@@ -3,7 +3,7 @@
 //! flattening to cash whenever BTC's trend regime filter is negative.
 //! Everything that is not the signal — the rebalance clock, the price
 //! buffers, artifact capture, notional-sized orders — comes from
-//! [`crate::strategy::runtime::StrategyRuntime`].
+//! [`crate::strategy::common::StrategyRuntime`].
 
 use std::fmt::Debug;
 
@@ -21,10 +21,7 @@ use crate::{
     config::RunConfig,
     period::IsoWeek,
     sizing::{self, Conviction},
-    strategy::{
-        common::{btc_instrument_id, n_day_return},
-        runtime::{Market, RuntimeState, StrategyRuntime},
-    },
+    strategy::common::{Market, RuntimeState, StrategyRuntime, btc_instrument_id, n_day_return},
 };
 
 use super::config::{self, Config};

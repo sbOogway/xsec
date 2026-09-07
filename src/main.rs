@@ -22,8 +22,8 @@ use xsec::{
     data,
     strategy::{
         StrategyKind,
+        common::StrategyRuntime,
         momentum::{XSectionalMomentum, config as momentum},
-        runtime::StrategyRuntime,
     },
 };
 

@@ -15,7 +15,7 @@ use clap::Args as ClapArgs;
 use nautilus_model::{enums::BarAggregation, identifiers::InstrumentId};
 use rust_decimal::{Decimal, prelude::ToPrimitive};
 
-use crate::strategy::runtime::Market;
+use crate::strategy::common::Market;
 
 /// The trading venue. Bybit-only: the data layer talks to the Bybit HTTP API
 /// and nothing else.
@@ -25,7 +25,7 @@ pub const VENUE: &str = "BYBIT";
 /// holding-period return and the capture schema all assume calendar months.
 pub const TIMEFRAME: BarAggregation = BarAggregation::Month;
 
-/// The market this strategy trades, for [`crate::strategy::runtime::StrategyRuntime`].
+/// The market this strategy trades, for [`crate::strategy::common::StrategyRuntime`].
 pub const MARKET: Market = Market {
     venue: VENUE,
     timeframe: TIMEFRAME,
