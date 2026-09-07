@@ -85,6 +85,15 @@ impl Debug for Top5MomentumFiltered {
 
 impl DataActor for Top5MomentumFiltered {
     fn on_start(&mut self) -> anyhow::Result<()> {
+        // Defense in depth: `config::build` already rejects this, but the
+        // rebalance path below assumes a one-week hold.
+        if self.config.holding_weeks != 1 {
+            return Err(anyhow::anyhow!(
+                "holding_weeks={} is not supported: the rebalance path assumes a one-week hold",
+                self.config.holding_weeks
+            ));
+        }
+
         let run = self.run.clone();
         let rows = config::config_rows(&self.config);
         self.open_capture(&run, &rows)?;
@@ -140,7 +149,12 @@ impl DataActor for Top5MomentumFiltered {
             return anyhow::Ok(());
         }
 
-        let holding_days = 7_u64 * self.config.holding_weeks as u64;
+        // `close_expired` ages out on a strict `>`, and rebalances land
+        // exactly `holding_weeks * 7` days apart, so last week's legs would
+        // never be strictly older than that gap. A day's cushion (mirroring
+        // momentum's 27-vs-30-day gap) ensures they clear before this week's
+        // legs are opened.
+        let holding_days = 7_u64 * self.config.holding_weeks as u64 - 1;
         self.close_expired(event, holding_days);
 
         // --- signal: composite fast/medium/slow momentum score, per name ---

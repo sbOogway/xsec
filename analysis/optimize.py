@@ -364,7 +364,7 @@ def main(argv: list[str] | None = None) -> None:
             f"warning: the out-of-sample window is only {month_span(oos_start, oos_end)} month(s) "
             f"long, <= the search space's max lookback_months ({int(max_lookback)}). The strategy "
             "needs lookback_months of bars to accumulate before it trades at all (see "
-            "start_universe's warm-up request in src/strategy/runtime.rs), so a best trial with a "
+            "start_universe's warm-up request in src/strategy/common.rs), so a best trial with a "
             "long lookback can show 0% out-of-sample simply because it never got a chance to "
             "trade — that's a too-short window, not evidence of overfitting. Widen "
             "--date-start/--date-end or lower --split-ratio if you see that.",
