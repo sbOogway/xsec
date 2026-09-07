@@ -11,6 +11,7 @@ use nautilus_common::{actor::DataActor, timer::TimeEvent};
 use nautilus_model::{
     data::Bar,
     enums::OrderSide,
+    events::OrderFilled,
     identifiers::{InstrumentId, StrategyId},
 };
 use nautilus_trading::{StrategyConfig, StrategyCore, nautilus_strategy};
@@ -47,7 +48,11 @@ pub struct Top5MomentumFiltered {
     runtime: RuntimeState<IsoWeek>,
 }
 
-nautilus_strategy!(Top5MomentumFiltered);
+nautilus_strategy!(Top5MomentumFiltered, {
+    fn on_order_filled(&mut self, event: &OrderFilled) {
+        self.record_fill(event);
+    }
+});
 
 impl StrategyRuntime for Top5MomentumFiltered {
     type Period = IsoWeek;
@@ -76,6 +81,10 @@ impl Debug for Top5MomentumFiltered {
 
 impl DataActor for Top5MomentumFiltered {
     fn on_start(&mut self) -> anyhow::Result<()> {
+        let run = self.run.clone();
+        let rows = config::config_rows(&self.config);
+        self.open_capture(&run, &rows)?;
+
         let instruments = config::instrument_ids(&self.run.bases);
         let window = self
             .config
@@ -95,6 +104,7 @@ impl DataActor for Top5MomentumFiltered {
     }
 
     fn on_stop(&mut self) -> anyhow::Result<()> {
+        self.finish_capture();
         anyhow::Ok(())
     }
 
