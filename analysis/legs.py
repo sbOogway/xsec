@@ -27,7 +27,8 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 RUNS_DIR = REPO_ROOT / "runs"
 
 REQUIRED_COLUMNS = {
-    "month",
+    "period",
+    "period_end_date",
     "instrument_id",
     "side",
     "entry_price",
@@ -63,8 +64,10 @@ def resolve_uuid(args: argparse.Namespace) -> str:
 def load_legs(uuid: str):
     """Load and lightly enrich ``runs/<uuid>/legs.csv``.
 
-    Adds ``pnl_usdt`` (per-leg USDT PnL), ``is_win`` (return strictly positive)
-    and ``month_dt`` (month-end timestamp) columns.
+    Adds ``pnl_usdt`` (per-leg USDT PnL) and ``is_win`` (return strictly
+    positive) columns, and parses ``period_end_date`` to a real timestamp
+    in place (it arrives as an ISO date string — the exact date each
+    rebalance period ends on, whatever the cadence).
     """
     import pandas as pd
 
@@ -90,8 +93,8 @@ def load_legs(uuid: str):
     legs["notional_usdt"] = legs["notional_usdt"].astype(float)
     legs["pnl_usdt"] = legs["per_leg_return"] * legs["notional_usdt"]
     legs["is_win"] = legs["per_leg_return"] > 0
-    legs["month_dt"] = pd.to_datetime(legs["month"], format="%Y-%m") + pd.offsets.MonthEnd(0)
-    return legs.sort_values(["month_dt", "instrument_id"]).reset_index(drop=True)
+    legs["period_end_date"] = pd.to_datetime(legs["period_end_date"])
+    return legs.sort_values(["period_end_date", "instrument_id"]).reset_index(drop=True)
 
 
 # -- rendering helpers ------------------------------------------------------
@@ -210,25 +213,25 @@ def section_book(legs) -> str:
         }
     )
 
-    monthly_pnl = legs.pivot_table(
-        index="month_dt", columns="side", values="pnl_usdt", aggfunc="sum"
+    period_pnl = legs.pivot_table(
+        index="period_end_date", columns="side", values="pnl_usdt", aggfunc="sum"
     ).fillna(0.0)
-    monthly_ret = legs.pivot_table(
-        index="month_dt", columns="side", values="per_leg_return", aggfunc="mean"
+    period_ret = legs.pivot_table(
+        index="period_end_date", columns="side", values="per_leg_return", aggfunc="mean"
     )
 
     fig, (top, bot) = plt.subplots(2, 1, figsize=(9, 7), sharex=True)
-    for side in monthly_pnl.columns:
-        top.plot(monthly_pnl.index, monthly_pnl[side].cumsum(), label=side, marker=".")
+    for side in period_pnl.columns:
+        top.plot(period_pnl.index, period_pnl[side].cumsum(), label=side, marker=".")
     top.set_title("Cumulative USDT PnL by book")
     top.set_ylabel("USDT")
     top.legend()
     top.grid(alpha=0.3)
 
-    for side in monthly_ret.columns:
-        bot.plot(monthly_ret.index, monthly_ret[side] * 100, label=side, marker=".")
+    for side in period_ret.columns:
+        bot.plot(period_ret.index, period_ret[side] * 100, label=side, marker=".")
     bot.axhline(0, color="#333", linewidth=0.8)
-    bot.set_title("Monthly mean leg return by book")
+    bot.set_title("Mean leg return by book, per rebalance period")
     bot.set_ylabel("%")
     bot.legend()
     bot.grid(alpha=0.3)
@@ -282,7 +285,7 @@ def section_distribution(legs) -> str:
     ax.legend()
     ax.grid(axis="y", alpha=0.3)
 
-    extremes_cols = ["month", "instrument_id", "side", "entry_price", "exit_price", "per_leg_return"]
+    extremes_cols = ["period", "instrument_id", "side", "entry_price", "exit_price", "per_leg_return"]
     k = min(10, len(legs))
     best = legs.nlargest(k, "per_leg_return")[extremes_cols].copy()
     worst = legs.nsmallest(k, "per_leg_return")[extremes_cols].copy()
@@ -299,24 +302,24 @@ def section_distribution(legs) -> str:
     )
 
 
-def section_monthly(legs) -> str:
+def section_periods(legs) -> str:
     import matplotlib.pyplot as plt
 
     def long_short_spread(frame):
         by_side = frame.groupby("side")["per_leg_return"].mean()
         return by_side.get("long", float("nan")) - by_side.get("short", float("nan"))
 
-    monthly = legs.groupby("month").agg(
+    periods = legs.groupby("period").agg(
         n_legs=("per_leg_return", "size"),
         mean_return=("per_leg_return", "mean"),
         dispersion=("per_leg_return", "std"),
         min_return=("per_leg_return", "min"),
         max_return=("per_leg_return", "max"),
     )
-    monthly["long_short_spread"] = legs.groupby("month").apply(long_short_spread, include_groups=False)
-    monthly = monthly.reset_index()
+    periods["long_short_spread"] = legs.groupby("period").apply(long_short_spread, include_groups=False)
+    periods = periods.reset_index()
 
-    display = monthly.copy()
+    display = periods.copy()
     for col in ("mean_return", "dispersion", "min_return", "max_return", "long_short_spread"):
         display[col] = display[col].map(lambda v: _pct(v) if v == v else "—")
     display = display.rename(
@@ -330,18 +333,18 @@ def section_monthly(legs) -> str:
     )
 
     fig, ax = plt.subplots(figsize=(9, 4))
-    colors = ["#27ae60" if v >= 0 else "#c0392b" for v in monthly["mean_return"]]
-    ax.bar(monthly["month"].astype(str), monthly["mean_return"] * 100, color=colors)
+    colors = ["#27ae60" if v >= 0 else "#c0392b" for v in periods["mean_return"]]
+    ax.bar(periods["period"].astype(str), periods["mean_return"] * 100, color=colors)
     ax.axhline(0, color="#333", linewidth=0.8)
     ax.set_ylabel("%")
-    ax.set_title("Monthly mean leg return")
+    ax.set_title("Mean leg return per rebalance period")
     ax.grid(axis="y", alpha=0.3)
-    step = max(1, len(monthly) // 24)
-    ax.set_xticks(range(0, len(monthly), step))
-    ax.set_xticklabels(monthly["month"].astype(str).iloc[::step], rotation=90)
+    step = max(1, len(periods) // 24)
+    ax.set_xticks(range(0, len(periods), step))
+    ax.set_xticklabels(periods["period"].astype(str).iloc[::step], rotation=90)
 
     return (
-        "<h2>Per-month leg breakdown</h2>"
+        "<h2>Per rebalance period leg breakdown</h2>"
         f"{_fig_to_img(fig)}"
         f"{_table(display)}"
     )
@@ -371,16 +374,16 @@ def render(uuid: str, legs) -> Path:
     output.parent.mkdir(parents=True, exist_ok=True)
 
     title = f"X-Sectional Momentum — per-leg diagnostics — {uuid}"
-    months = legs["month"].nunique()
+    periods = legs["period"].nunique()
     body = "".join(
         (
             f"<h1>Per-leg diagnostics</h1>",
-            f'<p class="sub">run <code>{uuid}</code> — {len(legs)} legs over {months} months '
+            f'<p class="sub">run <code>{uuid}</code> — {len(legs)} legs over {periods} rebalance periods '
             f'({legs["instrument_id"].nunique()} instruments)</p>',
             section_instruments(legs),
             section_book(legs),
             section_distribution(legs),
-            section_monthly(legs),
+            section_periods(legs),
         )
     )
     html = (

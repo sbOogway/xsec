@@ -18,7 +18,7 @@ import legs  # noqa: E402
 FIXTURE_UUID = "test-fixture-0001"
 
 LEGS_HEADER = (
-    "run_id,month,instrument_id,side,entry_price,exit_price,per_leg_return,notional_usdt\n"
+    "run_id,period,period_end_date,instrument_id,side,entry_price,exit_price,per_leg_return,notional_usdt\n"
 )
 
 
@@ -38,7 +38,7 @@ def write_legs(runs: Path, uuid: str, *, rows: str | None = None) -> None:
     if rows is None:
         # A few months, both books, a winner, a loser and a flat leg.
         rows = "".join(
-            f"{uuid},2025-{m:02d},{inst},{side},100,{100 * (1 + r):.4f},{r:.6f},{notional}\n"
+            f"{uuid},2025-{m:02d},2025-{m:02d}-28,{inst},{side},100,{100 * (1 + r):.4f},{r:.6f},{notional}\n"
             for m, inst, side, r, notional in (
                 (1, "BTCUSDT-LINEAR.BYBIT", "long", 0.10, 50),
                 (1, "ETHUSDT-LINEAR.BYBIT", "short", 0.05, 50),
@@ -73,7 +73,7 @@ def test_renders_self_contained_html_with_uuid_in_title(runs_dir):
         "Per-instrument attribution",
         "Long vs short book",
         "Leg return distribution",
-        "Per-month leg breakdown",
+        "Per rebalance period leg breakdown",
     ):
         assert heading in html
 
@@ -113,7 +113,7 @@ def test_header_only_legs_fails_loudly(runs_dir, capsys):
 def test_missing_columns_fails_loudly(runs_dir, capsys):
     run_dir = runs_dir / FIXTURE_UUID
     run_dir.mkdir(parents=True)
-    (run_dir / "legs.csv").write_text("run_id,month,side\nx,2025-01,long\n")
+    (run_dir / "legs.csv").write_text("run_id,period,side\nx,2025-01,long\n")
 
     with pytest.raises(SystemExit) as exc:
         legs.main(["--uuid", FIXTURE_UUID])
@@ -122,7 +122,7 @@ def test_missing_columns_fails_loudly(runs_dir, capsys):
 
 
 def test_single_leg_run_renders(runs_dir):
-    write_legs(runs_dir, FIXTURE_UUID, rows=f"{FIXTURE_UUID},2025-01,BTCUSDT-LINEAR.BYBIT,long,100,110,0.100000,50\n")
+    write_legs(runs_dir, FIXTURE_UUID, rows=f"{FIXTURE_UUID},2025-01,2025-01-31,BTCUSDT-LINEAR.BYBIT,long,100,110,0.100000,50\n")
 
     legs.main(["--uuid", FIXTURE_UUID])
     assert (runs_dir / FIXTURE_UUID / "legs.html").stat().st_size > 0
@@ -130,7 +130,7 @@ def test_single_leg_run_renders(runs_dir):
 
 def test_all_flat_month_renders(runs_dir):
     rows = "".join(
-        f"{FIXTURE_UUID},2025-02,{inst},{side},100,100,0.000000,40\n"
+        f"{FIXTURE_UUID},2025-02,2025-02-28,{inst},{side},100,100,0.000000,40\n"
         for inst, side in (
             ("BTCUSDT-LINEAR.BYBIT", "long"),
             ("ETHUSDT-LINEAR.BYBIT", "short"),

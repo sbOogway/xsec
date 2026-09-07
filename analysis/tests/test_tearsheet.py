@@ -35,16 +35,16 @@ def write_run(runs: Path, uuid: str, *, months: int = 8, empty_portfolio: bool =
     legs = run_dir / "legs.csv"
 
     legs.write_text(
-        "run_id,month,instrument_id,side,entry_price,exit_price,per_leg_return,notional_usdt\n"
-        f"{uuid},2025-01,BTCUSDT-LINEAR.BYBIT,long,100,110,0.100000,50\n"
+        "run_id,period,period_end_date,instrument_id,side,entry_price,exit_price,per_leg_return,notional_usdt\n"
+        f"{uuid},2025-01,2025-01-31,BTCUSDT-LINEAR.BYBIT,long,100,110,0.100000,50\n"
     )
 
     header = (
-        "run_id,month,n_long,n_short,gross_return,fee_paid_usdt,"
-        "net_return,equity_end_of_month_usdt,n_fills,fills_ref\n"
+        "run_id,period,period_end_date,n_long,n_short,gross_return,fee_paid_usdt,"
+        "net_return,equity_end_of_period_usdt,n_fills,fills_ref\n"
     )
     rows = "" if empty_portfolio else "".join(
-        f"{uuid},2025-{m:02d},5,5,0.02,1.0,0.019,{1000 + m}, 10,runs/{uuid}/fills.csv\n"
+        f"{uuid},2025-{m:02d},2025-{m:02d}-28,5,5,0.02,1.0,0.019,{1000 + m}, 10,runs/{uuid}/fills.csv\n"
         for m in range(1, months + 1)
     )
     portfolio.write_text(header + rows)

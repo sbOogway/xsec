@@ -15,7 +15,7 @@ use clap::Args as ClapArgs;
 use nautilus_model::{enums::BarAggregation, identifiers::InstrumentId};
 use rust_decimal::{Decimal, prelude::ToPrimitive};
 
-use crate::strategy::common::Market;
+use crate::strategy::runtime::Market;
 
 /// The trading venue. Bybit-only: the data layer talks to the Bybit HTTP API
 /// and nothing else.
@@ -25,7 +25,7 @@ pub const VENUE: &str = "BYBIT";
 /// holding-period return and the capture schema all assume calendar months.
 pub const TIMEFRAME: BarAggregation = BarAggregation::Month;
 
-/// The market this strategy trades, for [`crate::strategy::common::Harness`].
+/// The market this strategy trades, for [`crate::strategy::runtime::StrategyRuntime`].
 pub const MARKET: Market = Market {
     venue: VENUE,
     timeframe: TIMEFRAME,
@@ -98,7 +98,10 @@ pub fn build(args: &Args, bases: &[String]) -> Result<Config> {
 
     // Mirror the runtime cut in `on_time_event`: `floor(percentile * n)` names
     // per side. Below 1 there are no trades at all.
-    let per_side = (percentile * Decimal::from(n)).floor().to_usize().unwrap_or(0);
+    let per_side = (percentile * Decimal::from(n))
+        .floor()
+        .to_usize()
+        .unwrap_or(0);
     let need = (Decimal::ONE / percentile).ceil();
     ensure!(
         per_side >= 1,
@@ -144,7 +147,10 @@ pub fn build(args: &Args, bases: &[String]) -> Result<Config> {
 /// run rows.
 pub fn config_rows(cfg: &Config) -> Vec<(String, String)> {
     vec![
-        ("lookback_months".to_string(), cfg.lookback_months.to_string()),
+        (
+            "lookback_months".to_string(),
+            cfg.lookback_months.to_string(),
+        ),
         ("holding_months".to_string(), cfg.holding_months.to_string()),
         ("percentile".to_string(), cfg.percentile.clone()),
         ("risk_pct".to_string(), cfg.risk_pct.to_string()),

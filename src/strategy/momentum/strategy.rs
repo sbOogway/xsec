@@ -2,11 +2,10 @@
 //! go long the top `percentile` and short the bottom `percentile`, hold a
 //! month, repeat. Everything that is not the signal — the rebalance clock, the
 //! price buffers, artifact capture, notional-sized orders — comes from
-//! [`crate::strategy::common::Harness`].
+//! [`crate::strategy::runtime::StrategyRuntime`].
 
 use std::{collections::HashMap, fmt::Debug, str::FromStr};
 
-use anyhow::anyhow;
 use nautilus_common::{actor::DataActor, timer::TimeEvent};
 use nautilus_model::{
     data::Bar,
@@ -18,10 +17,10 @@ use nautilus_trading::{StrategyConfig, StrategyCore, nautilus_strategy};
 use rust_decimal::{Decimal, prelude::ToPrimitive};
 
 use crate::{
-    capture::YearMonth,
     config::RunConfig,
+    period::{RebalancePeriod, YearMonth},
     sizing::{self, Conviction},
-    strategy::common::{Harness, HarnessState, Market},
+    strategy::runtime::{Market, RuntimeState, StrategyRuntime},
 };
 
 use super::config::{self, Config};
@@ -44,7 +43,7 @@ pub struct XSectionalMomentum {
     /// Signal-agnostic backtest state: universe ids, rebalance clock, rolling
     /// price buffers, capture handle. Filled in `on_start`.
     #[builder(skip)]
-    harness: HarnessState,
+    runtime: RuntimeState<YearMonth>,
 
     /// Trailing return per instrument, recomputed each rebalance.
     #[builder(default)]
@@ -61,12 +60,14 @@ nautilus_strategy!(XSectionalMomentum, {
     }
 });
 
-impl Harness for XSectionalMomentum {
-    fn harness(&self) -> &HarnessState {
-        &self.harness
+impl StrategyRuntime for XSectionalMomentum {
+    type Period = YearMonth;
+
+    fn runtime(&self) -> &RuntimeState<YearMonth> {
+        &self.runtime
     }
-    fn harness_mut(&mut self) -> &mut HarnessState {
-        &mut self.harness
+    fn runtime_mut(&mut self) -> &mut RuntimeState<YearMonth> {
+        &mut self.runtime
     }
     fn market(&self) -> Market {
         config::MARKET
@@ -79,7 +80,7 @@ impl Debug for XSectionalMomentum {
             .field("run", &self.run)
             .field("config", &self.config)
             .field("core", &self.core)
-            .field("instruments", &self.harness.instruments)
+            .field("instruments", &self.runtime.instruments)
             .finish()
     }
 }
@@ -91,7 +92,7 @@ impl DataActor for XSectionalMomentum {
         // Defense in depth: `config::build` already rejects this, but the
         // rebalance path below assumes a one-month hold.
         if self.config.holding_months != 1 {
-            return Err(anyhow!(
+            return Err(anyhow::anyhow!(
                 "holding_months={} is not supported: the rebalance path assumes a one-month hold. \
                  Revisit the age-based close in on_time_event before changing this.",
                 self.config.holding_months
@@ -112,7 +113,7 @@ impl DataActor for XSectionalMomentum {
 
     fn on_bar(&mut self, bar: &Bar) -> anyhow::Result<()> {
         log::debug!("bar {} @ {}", bar.instrument_id(), bar.ts_event);
-        self.harness_mut().record_close(bar);
+        self.runtime_mut().record_close(bar);
         anyhow::Ok(())
     }
 
@@ -123,20 +124,23 @@ impl DataActor for XSectionalMomentum {
     }
 
     fn on_time_event(&mut self, event: &TimeEvent) -> anyhow::Result<()> {
-        let Some(current_month) = self.month_rolled(event) else {
+        let Some(period) = self.period_rolled(event) else {
             return anyhow::Ok(());
         };
 
-        let holding_months = self.config.holding_months;
-        self.close_expired(event, holding_months);
+        // A J-month return needs J+1 daily... rather, monthly price points; the
+        // aging window mirrors that: 27 days approximates a month so the
+        // full book turns over once per rebalance (hold == rebalance period).
+        let holding_days = 27_u64 * self.config.holding_months as u64;
+        self.close_expired(event, holding_days);
 
         // --- signal: trailing return over the formation window, per name ---
         let lookback = self.config.lookback_months;
-        let instruments = self.harness().instruments.clone();
+        let instruments = self.runtime().instruments.clone();
         let mut computed: Vec<(InstrumentId, Option<Decimal>)> =
             Vec::with_capacity(instruments.len());
         for instrument in &instruments {
-            let queue = self.harness().prices.get(instrument);
+            let queue = self.runtime().prices.get(instrument);
             let past = queue.and_then(|q| q.inner.front().copied());
             let now = queue.and_then(|q| q.inner.get((lookback - 1) as usize).copied());
             let ret = match (now, past) {
@@ -182,7 +186,6 @@ impl DataActor for XSectionalMomentum {
             log::info!("balance {:#?}", account.balances());
         }
 
-        let entry_month = YearMonth::from_nanos(event.ts_event.as_u64());
         let mut legs: Vec<(InstrumentId, OrderSide, Decimal, f64)> = Vec::new();
 
         // Gross budget for this rebalance, split between the two sides. Sizing is
@@ -217,7 +220,7 @@ impl DataActor for XSectionalMomentum {
             .sum();
         log::info!(
             "rebalance {}: equity={equity} budget={budget:.2} long={long_budget:.2} short={short_budget:.2} net_notional={net_notional:.2}",
-            entry_month.label()
+            period.label()
         );
 
         for (instrument, side, notional) in allocation {
@@ -228,7 +231,7 @@ impl DataActor for XSectionalMomentum {
             // rebalance. Paired with the same instrument's close one rebalance
             // later, this is a clean close-to-close holding-period return.
             if let Some(entry_price) = self
-                .harness()
+                .runtime()
                 .prices
                 .get(&instrument)
                 .and_then(|q| q.inner.back().copied())
@@ -237,13 +240,13 @@ impl DataActor for XSectionalMomentum {
             }
         }
 
-        let latest_close = self.harness().latest_closes();
-        if let Some(capture) = self.harness_mut().capture.as_mut() {
-            capture.record_rebalance(entry_month, equity, legs);
-            capture.finalise_completed(entry_month, &latest_close, equity);
+        let latest_close = self.runtime().latest_closes();
+        if let Some(capture) = self.runtime_mut().capture.as_mut() {
+            capture.record_rebalance(period, equity, legs);
+            capture.finalise_completed(period, &latest_close, equity);
         }
 
-        self.mark_rebalanced(current_month);
+        self.mark_rebalanced(period);
         anyhow::Ok(())
     }
 }

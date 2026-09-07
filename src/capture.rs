@@ -1,22 +1,27 @@
-//! Per-run artifact capture for the cross-sectional momentum backtest.
+//! Per-run artifact capture for a backtest.
 //!
 //! A single backtest run writes four files under `runs/<UUID>/`, all keyed by
 //! the run UUID the user already uses for `logs/<UUID>/logs.log`:
 //!
 //! * `runs/<UUID>/config.csv`    — the strategy configuration (key,value).
-//! * `runs/<UUID>/legs.csv`      — one row per (entry month, instrument) leg.
-//! * `runs/<UUID>/portfolio.csv` — one row per rebalance month, the aggregate.
+//! * `runs/<UUID>/legs.csv`      — one row per (entry period, instrument) leg.
+//! * `runs/<UUID>/portfolio.csv` — one row per rebalance period, the aggregate.
 //! * `runs/<UUID>/fills.csv`     — one row per `OrderFilled` event.
 //!
 //! The portfolio file is the source of truth for the tearsheet's headline
 //! return series; the legs and fills files are substrate for future
 //! per-leg / per-trade diagnostics.
 //!
-//! `portfolio.gross_return` / `net_return` are **account-level** monthly
-//! returns: the month's summed leg PnL (in USDT) divided by the month's opening
-//! equity, so compounding the series tracks `equity_end_of_month_usdt`. They
-//! are *not* the mean per-leg return — that would ignore how much of the
-//! account is actually deployed.
+//! `portfolio.gross_return` / `net_return` are **account-level** per-period
+//! returns: the period's summed leg PnL (in USDT) divided by the period's
+//! opening equity, so compounding the series tracks
+//! `equity_end_of_period_usdt`. They are *not* the mean per-leg return — that
+//! would ignore how much of the account is actually deployed.
+//!
+//! `RunCapture` is generic over [`crate::period::RebalancePeriod`]: the
+//! `period` / `period_end_date` columns and the finalisation logic below work
+//! the same way whatever cadence a strategy rebalances on — a calendar month
+//! or an ISO week are both just implementations of that trait.
 
 use std::{
     collections::{BTreeMap, HashMap},
@@ -26,53 +31,18 @@ use std::{
 };
 
 use anyhow::{Context, Result};
-use chrono::{DateTime, Datelike, Utc};
+use chrono::Utc;
 use nautilus_model::{enums::OrderSide, events::OrderFilled, identifiers::InstrumentId};
 use rust_decimal::Decimal;
 
+use crate::period::RebalancePeriod;
+
 pub const RUN_DIR: &str = "runs";
 
-pub const LEGS_HEADER: &str =
-    "run_id,month,instrument_id,side,entry_price,exit_price,per_leg_return,notional_usdt";
-pub const PORTFOLIO_HEADER: &str = "run_id,month,n_long,n_short,gross_return,fee_paid_usdt,net_return,equity_end_of_month_usdt,n_fills,fills_ref";
+pub const LEGS_HEADER: &str = "run_id,period,period_end_date,instrument_id,side,entry_price,exit_price,per_leg_return,notional_usdt";
+pub const PORTFOLIO_HEADER: &str = "run_id,period,period_end_date,n_long,n_short,gross_return,fee_paid_usdt,net_return,equity_end_of_period_usdt,n_fills,fills_ref";
 pub const FILLS_HEADER: &str =
     "run_id,ts_event,instrument_id,side,order_side,quantity,fill_price,fee_usdt";
-
-/// A calendar month in UTC, the join key between legs and portfolio rows.
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
-pub struct YearMonth {
-    pub year: i32,
-    pub month: u32,
-}
-
-impl YearMonth {
-    pub fn from_nanos(ts_event: u64) -> Self {
-        let dt = DateTime::<Utc>::from_timestamp_nanos(ts_event as i64);
-        Self {
-            year: dt.year(),
-            month: dt.month(),
-        }
-    }
-
-    /// The month immediately after this one.
-    pub fn next(self) -> Self {
-        if self.month == 12 {
-            Self {
-                year: self.year + 1,
-                month: 1,
-            }
-        } else {
-            Self {
-                year: self.year,
-                month: self.month + 1,
-            }
-        }
-    }
-
-    pub fn label(self) -> String {
-        format!("{:04}-{:02}", self.year, self.month)
-    }
-}
 
 /// The shared run configuration, written to `<UUID>/config.csv` (with the
 /// strategy's own rows appended) so a tearsheet — or a human — can label a run
@@ -91,26 +61,26 @@ struct PendingLeg {
     notional_usdt: f64,
 }
 
-/// Everything captured for one rebalance month until it can be finalised.
+/// Everything captured for one rebalance period until it can be finalised.
 #[derive(Default)]
-struct MonthAccrual {
+struct PeriodAccrual {
     legs: Vec<PendingLeg>,
     equity_start: Option<Decimal>,
     fee_paid: Decimal,
     n_fills: u32,
 }
 
-pub struct RunCapture {
+pub struct RunCapture<P: RebalancePeriod> {
     run_id: String,
     fills_ref: String,
     legs: BufWriter<File>,
     portfolio: BufWriter<File>,
     fills: BufWriter<File>,
-    /// Rebalance months awaiting finalisation, oldest first.
-    months: BTreeMap<YearMonth, MonthAccrual>,
+    /// Rebalance periods awaiting finalisation, oldest first.
+    periods: BTreeMap<P, PeriodAccrual>,
 }
 
-impl RunCapture {
+impl<P: RebalancePeriod> RunCapture<P> {
     /// Open (append mode) the four run files under `runs/<run_id>/`, writing
     /// headers to any that are new, and (re)write the config sidecar. Creates
     /// the run directory on demand. `strategy_rows` are the running strategy's
@@ -145,12 +115,12 @@ impl RunCapture {
             legs,
             portfolio,
             fills,
-            months: BTreeMap::new(),
+            periods: BTreeMap::new(),
         })
     }
 
     /// Record an `OrderFilled` event: one fills row now, plus the fee and fill
-    /// count folded into that calendar month's accrual.
+    /// count folded into that rebalance period's accrual.
     pub fn record_fill(&mut self, event: &OrderFilled) {
         let fee = event
             .commission
@@ -177,7 +147,7 @@ impl RunCapture {
         fill_price: Decimal,
         fee_usdt: Decimal,
     ) {
-        let month = YearMonth::from_nanos(ts_event);
+        let period = P::from_nanos(ts_event);
         let _ = writeln!(
             self.fills,
             "{},{},{},{},{},{},{},{}",
@@ -192,21 +162,21 @@ impl RunCapture {
         );
         let _ = self.fills.flush();
 
-        let accrual = self.months.entry(month).or_default();
+        let accrual = self.periods.entry(period).or_default();
         accrual.fee_paid += fee_usdt;
         accrual.n_fills += 1;
     }
 
-    /// Record a rebalance: snapshot the month's opening equity and stash the
-    /// legs entered this month. `legs` is `(instrument, side, entry_price,
+    /// Record a rebalance: snapshot the period's opening equity and stash the
+    /// legs entered this period. `legs` is `(instrument, side, entry_price,
     /// notional_usdt)` for each order submitted.
     pub fn record_rebalance(
         &mut self,
-        month: YearMonth,
+        period: P,
         equity_start: Decimal,
         legs: Vec<(InstrumentId, OrderSide, Decimal, f64)>,
     ) {
-        let accrual = self.months.entry(month).or_default();
+        let accrual = self.periods.entry(period).or_default();
         accrual.equity_start.get_or_insert(equity_start);
         for (instrument, side, entry_price, notional_usdt) in legs {
             accrual.legs.push(PendingLeg {
@@ -218,48 +188,49 @@ impl RunCapture {
         }
     }
 
-    /// Finalise every month strictly older than `up_to` for which an exit
+    /// Finalise every period strictly older than `up_to` for which an exit
     /// price is available, using `latest_close` as the exit mark. Called each
-    /// rebalance (with the current month) and once more at `on_stop`.
+    /// rebalance (with the current period) and once more at `on_stop`.
     pub fn finalise_completed(
         &mut self,
-        up_to: YearMonth,
+        up_to: P,
         latest_close: &HashMap<InstrumentId, Decimal>,
         equity_now: Decimal,
     ) {
-        let due: Vec<YearMonth> = self
-            .months
+        let due: Vec<P> = self
+            .periods
             .keys()
             .copied()
-            .filter(|m| m.next() <= up_to)
+            .filter(|p| p.next() <= up_to)
             .collect();
-        for entry_month in due {
-            self.finalise_month(entry_month, latest_close, equity_now);
+        for entry_period in due {
+            self.finalise_period(entry_period, latest_close, equity_now);
         }
     }
 
-    /// Finalise all remaining months, treating `latest_close` as the exit mark
+    /// Finalise all remaining periods, treating `latest_close` as the exit mark
     /// for legs that never saw a following rebalance.
     pub fn finish(&mut self, latest_close: &HashMap<InstrumentId, Decimal>, equity_now: Decimal) {
-        let remaining: Vec<YearMonth> = self.months.keys().copied().collect();
-        for entry_month in remaining {
-            self.finalise_month(entry_month, latest_close, equity_now);
+        let remaining: Vec<P> = self.periods.keys().copied().collect();
+        for entry_period in remaining {
+            self.finalise_period(entry_period, latest_close, equity_now);
         }
         let _ = self.legs.flush();
         let _ = self.portfolio.flush();
         let _ = self.fills.flush();
     }
 
-    fn finalise_month(
+    fn finalise_period(
         &mut self,
-        entry_month: YearMonth,
+        entry_period: P,
         latest_close: &HashMap<InstrumentId, Decimal>,
         equity_end: Decimal,
     ) {
-        let Some(accrual) = self.months.remove(&entry_month) else {
+        let Some(accrual) = self.periods.remove(&entry_period) else {
             return;
         };
-        let month_label = entry_month.label();
+        let period_label = entry_period.label();
+        let period_end_date = entry_period.end_date();
 
         let mut n_long = 0u32;
         let mut n_short = 0u32;
@@ -288,9 +259,10 @@ impl RunCapture {
 
             let _ = writeln!(
                 self.legs,
-                "{},{},{},{},{},{},{},{}",
+                "{},{},{},{},{},{},{},{},{}",
                 self.run_id,
-                month_label,
+                period_label,
+                period_end_date,
                 leg.instrument,
                 side_label_from_order(leg.side),
                 leg.entry_price.normalize(),
@@ -302,8 +274,8 @@ impl RunCapture {
         let _ = self.legs.flush();
 
         // Both `gross_return` and the fee drag are expressed as a fraction of
-        // the month's *opening* equity, so the series compounds as an
-        // account-level return that lines up with `equity_end_of_month_usdt`
+        // the period's *opening* equity, so the series compounds as an
+        // account-level return that lines up with `equity_end_of_period_usdt`
         // (modulo the bar-math vs simulated-account differences the README
         // spells out). Dividing by notional instead would overstate the return
         // by roughly equity / notional_deployed.
@@ -311,18 +283,16 @@ impl RunCapture {
         let (gross_return, fee_drag) = if equity_start.is_zero() {
             (Decimal::ZERO, Decimal::ZERO)
         } else {
-            (
-                leg_pnl_usdt / equity_start,
-                accrual.fee_paid / equity_start,
-            )
+            (leg_pnl_usdt / equity_start, accrual.fee_paid / equity_start)
         };
         let net_return = gross_return - fee_drag;
 
         let _ = writeln!(
             self.portfolio,
-            "{},{},{},{},{},{},{},{},{},{}",
+            "{},{},{},{},{},{},{},{},{},{},{}",
             self.run_id,
-            month_label,
+            period_label,
+            period_end_date,
             n_long,
             n_short,
             round_6dp(gross_return),
@@ -353,7 +323,8 @@ fn open_appending(path: &Path, header: &str) -> Result<BufWriter<File>> {
 
 fn write_config(path: &Path, cfg: &RunConfig, strategy_rows: &[(String, String)]) -> Result<()> {
     let generated_at = Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
-    let mut w = BufWriter::new(File::create(path).with_context(|| format!("create {}", path.display()))?);
+    let mut w =
+        BufWriter::new(File::create(path).with_context(|| format!("create {}", path.display()))?);
     writeln!(w, "key,value")?;
     writeln!(w, "run_id,{}", cfg.run_id)?;
     writeln!(w, "generated_at,{generated_at}")?;
@@ -396,15 +367,6 @@ fn side_label_from_order(side: OrderSide) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn year_month_next_wraps_december() {
-        let dec = YearMonth {
-            year: 2025,
-            month: 12,
-        };
-        assert_eq!(dec.next(), YearMonth { year: 2026, month: 1 });
-    }
 
     #[test]
     fn round_6dp_pads_and_truncates() {

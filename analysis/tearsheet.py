@@ -43,7 +43,7 @@ def resolve_uuid(args: argparse.Namespace) -> str:
 
 
 def load_returns(uuid: str):
-    """Build the monthly net-return series QuantStats consumes."""
+    """Build the per-rebalance-period net-return series QuantStats consumes."""
     import pandas as pd
 
     portfolio_path = RUNS_DIR / uuid / "portfolio.csv"
@@ -60,15 +60,17 @@ def load_returns(uuid: str):
     frame = pd.read_csv(portfolio_path)
     if frame.empty:
         _fail(f"portfolio CSV is empty for run {uuid}")
-    if "net_return" not in frame.columns or "month" not in frame.columns:
-        _fail(f"portfolio CSV for run {uuid} is missing 'month'/'net_return' columns")
+    if "net_return" not in frame.columns or "period_end_date" not in frame.columns:
+        _fail(f"portfolio CSV for run {uuid} is missing 'period_end_date'/'net_return' columns")
 
     legs = pd.read_csv(legs_path)
     if legs.empty:
         _fail(f"legs CSV has a header but no rows for run {uuid}")
 
-    # Month label 'YYYY-MM' -> month-end UTC timestamp.
-    index = pd.to_datetime(frame["month"], format="%Y-%m") + pd.offsets.MonthEnd(0)
+    # period_end_date is already the exact date each rebalance period ends on
+    # (month-end for a monthly strategy, the ISO week's Sunday for a weekly
+    # one, ...) — no cadence-specific parsing needed here.
+    index = pd.to_datetime(frame["period_end_date"])
     series = pd.Series(frame["net_return"].astype(float).values, index=index, name="Strategy")
     series.index.name = "Date"
     return series.sort_index()
@@ -114,7 +116,7 @@ def main(argv: list[str] | None = None) -> None:
     uuid = resolve_uuid(args)
     returns = load_returns(uuid)
     output = render(uuid, returns)
-    print(f"wrote {output.relative_to(REPO_ROOT)}  ({len(returns)} months)")
+    print(f"wrote {output.relative_to(REPO_ROOT)}  ({len(returns)} periods)")
 
 
 if __name__ == "__main__":

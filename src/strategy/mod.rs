@@ -4,13 +4,13 @@
 //! and a `config.rs` (its CLI flags, its resolved config, its `config.csv`
 //! rows, and the market it trades). Signal-agnostic backtest wiring — the
 //! rebalance clock, the price buffers, artifact capture, notional sizing —
-//! lives once in [`common`].
+//! lives once in [`runtime`].
 //!
 //! The binary picks a strategy with a clap subcommand ([`StrategyKind`]); each
 //! variant carries that strategy's [`clap::Args`].
 
-pub mod common;
 pub mod momentum;
+pub mod runtime;
 
 use clap::Subcommand;
 
