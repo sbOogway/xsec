@@ -4,13 +4,14 @@
 //! and a `config.rs` (its CLI flags, its resolved config, its `config.csv`
 //! rows, and the market it trades). Signal-agnostic backtest wiring — the
 //! rebalance clock, the price buffers, artifact capture, notional sizing —
-//! lives once in [`runtime`].
+//! plus small cross-strategy helpers, lives once in [`common`].
 //!
 //! The binary picks a strategy with a clap subcommand ([`StrategyKind`]); each
 //! variant carries that strategy's [`clap::Args`].
 
+pub mod common;
 pub mod momentum;
-pub mod runtime;
+pub mod top5_momentum_filtered;
 
 use clap::Subcommand;
 
@@ -21,6 +22,9 @@ pub enum StrategyKind {
     /// Jegadeesh–Titman cross-sectional momentum: each month go long the top
     /// decile and short the bottom decile of the universe by trailing return.
     Momentum(momentum::config::Args),
+    /// Long-only top-5 composite momentum, rebalanced weekly, with a BTC
+    /// regime filter that flattens the book to cash on a negative trend.
+    Top5MomentumFiltered(top5_momentum_filtered::config::Args),
 }
 
 impl StrategyKind {
@@ -28,6 +32,7 @@ impl StrategyKind {
     pub fn name(&self) -> &'static str {
         match self {
             StrategyKind::Momentum(_) => "cross_sectional_momentum",
+            StrategyKind::Top5MomentumFiltered(_) => "top5_momentum_filtered",
         }
     }
 }

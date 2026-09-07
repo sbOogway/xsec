@@ -1,5 +1,5 @@
 //! The cadence-agnostic "what rebalance period is this" abstraction shared by
-//! the strategy runtime's rebalance clock ([`crate::strategy::runtime`]) and
+//! the strategy runtime's rebalance clock ([`crate::strategy::common`]) and
 //! the run-artifact capture layer ([`crate::capture`]).
 //!
 //! A period is whatever a strategy rebalances on — a calendar month

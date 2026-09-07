@@ -22,8 +22,9 @@ use xsec::{
     data,
     strategy::{
         StrategyKind,
+        common::StrategyRuntime,
         momentum::{XSectionalMomentum, config as momentum},
-        runtime::StrategyRuntime,
+        top5_momentum_filtered::{Top5MomentumFiltered, config as top5_momentum_filtered},
     },
 };
 
@@ -55,6 +56,24 @@ fn main() -> anyhow::Result<()> {
                 &run,
                 momentum::VENUE,
                 momentum::TIMEFRAME,
+                &instrument_ids,
+                strategy,
+            )?;
+        }
+        StrategyKind::Top5MomentumFiltered(args) => {
+            let run = config::build_config(&cli, &argv, cli.strategy.name())?;
+            let strategy_config = top5_momentum_filtered::build(args, &run.bases)?;
+            println!("run_id={}", run.run_id);
+
+            let strategy = Top5MomentumFiltered::builder()
+                .run(run.clone())
+                .config(strategy_config)
+                .build();
+            let instrument_ids = top5_momentum_filtered::instrument_ids(&run.bases);
+            run_engine(
+                &run,
+                top5_momentum_filtered::VENUE,
+                top5_momentum_filtered::TIMEFRAME,
                 &instrument_ids,
                 strategy,
             )?;

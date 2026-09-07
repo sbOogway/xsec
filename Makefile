@@ -4,6 +4,7 @@
 #   make tearsheet UUID=<id>                   # pin / re-render a specific run id
 #   make tearsheet ARGS="--lookback-months 6"  # pass extra flags to the strategy
 #   make tearsheet STRATEGY=momentum           # pick a strategy (this is the default)
+#   make tearsheet STRATEGY=top5-momentum-filtered ARGS="--top-n 3"
 #
 # Everything for a run is keyed by $(UUID):
 #   logs/<UUID>/logs.log

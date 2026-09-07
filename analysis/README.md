@@ -99,7 +99,7 @@ window dates, best params, both CAGRs, both run uuids — is written to
 
 **Caveat:** the strategy needs `lookback_months` monthly bars to accumulate
 before it trades at all (the warm-up request in `start_universe`,
-`src/strategy/runtime.rs`). If the out-of-sample slice is shorter than the
+`src/strategy/common.rs`). If the out-of-sample slice is shorter than the
 search space's longest `lookback_months` (12), a trial that picked a long
 lookback can show a flat 0% out-of-sample — it never got a chance to trade —
 which is a too-short window, not evidence of overfitting. `optimize.py` warns
