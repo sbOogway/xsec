@@ -10,10 +10,11 @@
 //! it ranks the universe and how it splits the budget across legs.
 //!
 //! The rebalance clock and the capture join key both derive from the same
-//! [`crate::period::RebalancePeriod`] value (`StrategyRuntime::Period`) — a
-//! strategy declares its cadence once, rather than keying its clock guard and
-//! its `legs.csv`/`portfolio.csv` rows off two independent definitions of
-//! "what period is this."
+//! [`crate::period::RebalancePeriod`] value (`StrategyRuntime::Period`,
+//! produced by `StrategyRuntime::current_period`) — a strategy declares its
+//! cadence once, rather than keying its clock guard and its
+//! `legs.csv`/`portfolio.csv` rows off two independent definitions of "what
+//! period is this."
 
 use std::{collections::HashMap, fmt::Debug, time::Duration};
 
@@ -125,6 +126,13 @@ pub trait StrategyRuntime:
     fn runtime_mut(&mut self) -> &mut RuntimeState<Self::Period>;
     fn market(&self) -> Market;
 
+    /// The [`Self::Period`] a clock tick at `ts_nanos` falls in. A fixed-cadence
+    /// strategy returns `SomeConcretePeriod::from_nanos(ts_nanos)`; one with a
+    /// run-time `--holding-period` flag dispatches on it. Drives both
+    /// [`period_rolled`](Self::period_rolled) and the fill-fee accrual in
+    /// [`record_fill`](Self::record_fill).
+    fn current_period(&self, ts_nanos: u64) -> Self::Period;
+
     /// Open the run's capture files: the shared config rows plus whatever rows
     /// this strategy contributes. Call once from `on_start`.
     fn open_capture(&mut self, run: &RunConfig, strategy_rows: &[(String, String)]) -> Result<()> {
@@ -168,7 +176,7 @@ pub trait StrategyRuntime:
     /// rebalance, else `None`. On a roll the caller does its work and then
     /// calls [`mark_rebalanced`](Self::mark_rebalanced) with the same period.
     fn period_rolled(&self, event: &TimeEvent) -> Option<Self::Period> {
-        let period = Self::Period::from_nanos(event.ts_event.as_u64());
+        let period = self.current_period(event.ts_event.as_u64());
         (self.runtime().last_period != Some(period)).then_some(period)
     }
 
@@ -269,10 +277,12 @@ pub trait StrategyRuntime:
         true
     }
 
-    /// Forward an `OrderFilled` to the capture layer.
+    /// Forward an `OrderFilled` to the capture layer, tagged with the rebalance
+    /// period its timestamp falls in.
     fn record_fill(&mut self, event: &OrderFilled) {
+        let period = self.current_period(event.ts_event.as_u64());
         if let Some(capture) = self.runtime_mut().capture.as_mut() {
-            capture.record_fill(event);
+            capture.record_fill(period, event);
         }
     }
 

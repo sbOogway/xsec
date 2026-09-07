@@ -6,7 +6,8 @@ over a basket of Bybit USDT-margined linear perpetuals. Two strategies:
 - `momentum`: each month, long the top decile and short the bottom decile,
   ranked by trailing return.
 - `top5-momentum-filtered`: long-only, top 5 names by a composite fast/medium/
-  slow momentum score, rebalanced daily, sitting out in cash whenever BTC's
+  slow momentum score, rebalanced on a configurable cadence (daily by default;
+  `--holding-period iso-week` / `month`), sitting out in cash whenever BTC's
   trend regime turns negative.
 
 Each run produces two per-run HTML reports alongside the log: a QuantStats
@@ -69,11 +70,12 @@ strategy's knobs: `momentum` (the `make` default) and
 | `--fast-weight <w>`           | `0.3` | weight on fast momentum in the composite score |
 | `--medium-weight <w>`         | `0.2` | weight on medium momentum in the composite score |
 | `--slow-weight <w>`           | `0.5` | weight on slow momentum in the composite score |
-| `--top-n <n>`                 | `5`   | number of names held long each day |
+| `--top-n <n>`                 | `5`   | number of names held long at a time |
 | `--regime-lookback-days <n>`  | `20`  | BTC trailing-return window for the regime filter |
 | `--risk-fraction <r>`         | `0.8` | gross exposure as a fraction of account equity, per rebalance (long-only, so this is net exposure too) |
 | `--allocation-tilt <t>`       | `0.0` | within-book lean toward higher-conviction names (`0` = equal weight) |
-| `--holding-days <n>`          | `1`   | holding period; only `1` is supported today |
+| `--holding-period <unit>`     | `day` | rebalance clock unit: `day`, `iso-week` or `month` |
+| `--number-holding-periods <n>`| `1`   | `--holding-period` units the book is held before it is re-ranked and fully turned over |
 
 The universe must include `BTC` (case-insensitive) — the regime filter reads
 its trailing return from the same buffer, no separate subscription.

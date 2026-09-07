@@ -22,8 +22,9 @@ pub enum StrategyKind {
     /// Jegadeesh–Titman cross-sectional momentum: each month go long the top
     /// decile and short the bottom decile of the universe by trailing return.
     Momentum(momentum::config::Args),
-    /// Long-only top-5 composite momentum, rebalanced daily, with a BTC
-    /// regime filter that flattens the book to cash on a negative trend.
+    /// Long-only top-5 composite momentum on a configurable rebalance cadence
+    /// (`--holding-period`, default daily), with a BTC regime filter that
+    /// flattens the book to cash on a negative trend.
     Top5MomentumFiltered(top5_momentum_filtered::config::Args),
 }
 

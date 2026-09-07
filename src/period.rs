@@ -3,24 +3,27 @@
 //! the run-artifact capture layer ([`crate::capture`]).
 //!
 //! A period is whatever a strategy rebalances on — a calendar month
-//! ([`YearMonth`]) for `momentum`, a single calendar day ([`CalendarDay`]) for
-//! a daily-cadence strategy, an ISO week ([`IsoWeek`]) for a weekly one. Both
-//! the rebalance-clock guard and the `legs.csv` / `portfolio.csv` join key
-//! derive from the same value via [`RebalancePeriod`], so there is exactly one
+//! ([`YearMonth`]) for `momentum`, a single calendar day ([`CalendarDay`]) or
+//! an ISO week ([`IsoWeek`]) for `top5-momentum-filtered`. Both the
+//! rebalance-clock guard and the `legs.csv` / `portfolio.csv` join key derive
+//! from the same value via [`RebalancePeriod`], so there is exactly one
 //! definition of "what period is this" per strategy, not two independent ones.
+//!
+//! A strategy with a fixed cadence uses a concrete type directly (`momentum`
+//! keys on `YearMonth`). One whose cadence is a run-time flag uses
+//! [`CalendarPeriod`], the tagged union of all three, with [`HoldingPeriod`]
+//! selecting which arm a `--holding-period` flag picks.
 
 use chrono::{DateTime, Datelike, NaiveDate, Utc, Weekday};
 
 /// A rebalance period: the unit a strategy's clock rolls over on, and the join
 /// key [`crate::capture::RunCapture`] groups legs and portfolio rows by.
 ///
-/// Implement this for a new cadence to give a strategy a rebalance clock and a
-/// capture join key at once — no other change to the runtime or capture layer
-/// is needed.
+/// Implementors also carry an inherent `from_nanos(ts_event: u64) -> Self`
+/// bucketing constructor; it is not on the trait because [`CalendarPeriod`]
+/// can only bucket once its arm is known. Turning a clock tick into a period is
+/// [`StrategyRuntime::current_period`](crate::strategy::common::StrategyRuntime::current_period).
 pub trait RebalancePeriod: Ord + Copy + std::fmt::Debug + std::hash::Hash {
-    /// The period `ts_event` (a Nautilus event's nanosecond timestamp) falls in.
-    fn from_nanos(ts_event: u64) -> Self;
-
     /// The `runs/<uuid>/{legs,portfolio}.csv` `period` column value.
     fn label(&self) -> String;
 
@@ -39,13 +42,9 @@ pub struct YearMonth {
 }
 
 impl YearMonth {
-    fn start_date(&self) -> NaiveDate {
-        NaiveDate::from_ymd_opt(self.year, self.month, 1).expect("valid year/month")
-    }
-}
-
-impl RebalancePeriod for YearMonth {
-    fn from_nanos(ts_event: u64) -> Self {
+    /// The calendar month `ts_event` (a Nautilus event's nanosecond timestamp)
+    /// falls in, in UTC.
+    pub fn from_nanos(ts_event: u64) -> Self {
         let dt = DateTime::<Utc>::from_timestamp_nanos(ts_event as i64);
         Self {
             year: dt.year(),
@@ -53,6 +52,12 @@ impl RebalancePeriod for YearMonth {
         }
     }
 
+    fn start_date(&self) -> NaiveDate {
+        NaiveDate::from_ymd_opt(self.year, self.month, 1).expect("valid year/month")
+    }
+}
+
+impl RebalancePeriod for YearMonth {
     fn label(&self) -> String {
         format!("{:04}-{:02}", self.year, self.month)
     }
@@ -88,14 +93,18 @@ pub struct CalendarDay {
     pub date: NaiveDate,
 }
 
-impl RebalancePeriod for CalendarDay {
-    fn from_nanos(ts_event: u64) -> Self {
+impl CalendarDay {
+    /// The calendar day `ts_event` (a Nautilus event's nanosecond timestamp)
+    /// falls in, in UTC.
+    pub fn from_nanos(ts_event: u64) -> Self {
         let dt = DateTime::<Utc>::from_timestamp_nanos(ts_event as i64);
         Self {
             date: dt.date_naive(),
         }
     }
+}
 
+impl RebalancePeriod for CalendarDay {
     fn label(&self) -> String {
         self.date.format("%Y-%m-%d").to_string()
     }
@@ -120,14 +129,9 @@ pub struct IsoWeek {
 }
 
 impl IsoWeek {
-    fn monday(&self) -> NaiveDate {
-        NaiveDate::from_isoywd_opt(self.year, self.week, Weekday::Mon)
-            .expect("valid ISO week-year/week")
-    }
-}
-
-impl RebalancePeriod for IsoWeek {
-    fn from_nanos(ts_event: u64) -> Self {
+    /// The ISO-8601 week `ts_event` (a Nautilus event's nanosecond timestamp)
+    /// falls in, in UTC.
+    pub fn from_nanos(ts_event: u64) -> Self {
         let dt = DateTime::<Utc>::from_timestamp_nanos(ts_event as i64);
         let iso = dt.iso_week();
         Self {
@@ -136,6 +140,13 @@ impl RebalancePeriod for IsoWeek {
         }
     }
 
+    fn monday(&self) -> NaiveDate {
+        NaiveDate::from_isoywd_opt(self.year, self.week, Weekday::Mon)
+            .expect("valid ISO week-year/week")
+    }
+}
+
+impl RebalancePeriod for IsoWeek {
     fn label(&self) -> String {
         format!("{:04}-W{:02}", self.year, self.week)
     }
@@ -151,6 +162,78 @@ impl RebalancePeriod for IsoWeek {
         Self {
             year: iso.year(),
             week: iso.week(),
+        }
+    }
+}
+
+/// Which [`RebalancePeriod`] a strategy's rebalance clock runs on, as picked by
+/// a `--holding-period` CLI flag. clap renders the arms `day`, `iso-week`,
+/// `month`.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, clap::ValueEnum)]
+pub enum HoldingPeriod {
+    Day,
+    IsoWeek,
+    Month,
+}
+
+impl HoldingPeriod {
+    /// The [`CalendarPeriod`] `ts_event` (a Nautilus event's nanosecond
+    /// timestamp) falls in, at this cadence.
+    pub fn period_at(self, ts_event: u64) -> CalendarPeriod {
+        match self {
+            Self::Day => CalendarPeriod::Day(CalendarDay::from_nanos(ts_event)),
+            Self::IsoWeek => CalendarPeriod::IsoWeek(IsoWeek::from_nanos(ts_event)),
+            Self::Month => CalendarPeriod::Month(YearMonth::from_nanos(ts_event)),
+        }
+    }
+
+    /// The `runs/<uuid>/config.csv` `holding_period` value.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Day => "day",
+            Self::IsoWeek => "iso-week",
+            Self::Month => "month",
+        }
+    }
+}
+
+/// A [`RebalancePeriod`] whose cadence is chosen at run time — one of
+/// [`CalendarDay`], [`IsoWeek`] or [`YearMonth`], tagged so `label` /
+/// `end_date` / `next` dispatch to the right one. `top5-momentum-filtered`
+/// keys on this so `--holding-period` can pick the cadence per run.
+///
+/// A single run only ever holds one arm (the one [`HoldingPeriod::period_at`]
+/// produces), so the derived `Ord` — which orders by arm first — only ever
+/// compares within that arm.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
+pub enum CalendarPeriod {
+    Day(CalendarDay),
+    IsoWeek(IsoWeek),
+    Month(YearMonth),
+}
+
+impl RebalancePeriod for CalendarPeriod {
+    fn label(&self) -> String {
+        match self {
+            Self::Day(p) => p.label(),
+            Self::IsoWeek(p) => p.label(),
+            Self::Month(p) => p.label(),
+        }
+    }
+
+    fn end_date(&self) -> NaiveDate {
+        match self {
+            Self::Day(p) => p.end_date(),
+            Self::IsoWeek(p) => p.end_date(),
+            Self::Month(p) => p.end_date(),
+        }
+    }
+
+    fn next(&self) -> Self {
+        match self {
+            Self::Day(p) => Self::Day(p.next()),
+            Self::IsoWeek(p) => Self::IsoWeek(p.next()),
+            Self::Month(p) => Self::Month(p.next()),
         }
     }
 }
@@ -259,5 +342,72 @@ mod tests {
             CalendarDay::from_nanos(midnight + 86_400 * 1_000_000_000 - 1),
             day(2026, 1, 12)
         );
+    }
+
+    #[test]
+    fn holding_period_buckets_one_timestamp_three_ways() {
+        // 2026-01-12T00:00:00Z is a Monday, start of ISO week 3.
+        let ts = 1_768_176_000_000_000_000u64;
+        assert_eq!(
+            HoldingPeriod::Day.period_at(ts),
+            CalendarPeriod::Day(day(2026, 1, 12))
+        );
+        assert_eq!(
+            HoldingPeriod::IsoWeek.period_at(ts),
+            CalendarPeriod::IsoWeek(IsoWeek {
+                year: 2026,
+                week: 3
+            })
+        );
+        assert_eq!(
+            HoldingPeriod::Month.period_at(ts),
+            CalendarPeriod::Month(YearMonth {
+                year: 2026,
+                month: 1
+            })
+        );
+    }
+
+    #[test]
+    fn calendar_period_delegates_label_end_date_and_next() {
+        let d = CalendarPeriod::Day(day(2026, 1, 31));
+        assert_eq!(d.label(), "2026-01-31");
+        assert_eq!(d.end_date(), NaiveDate::from_ymd_opt(2026, 1, 31).unwrap());
+        assert_eq!(d.next(), CalendarPeriod::Day(day(2026, 2, 1)));
+
+        let w = CalendarPeriod::IsoWeek(IsoWeek {
+            year: 2026,
+            week: 3,
+        });
+        assert_eq!(w.label(), "2026-W03");
+        assert_eq!(w.end_date(), NaiveDate::from_ymd_opt(2026, 1, 18).unwrap());
+        assert_eq!(
+            w.next(),
+            CalendarPeriod::IsoWeek(IsoWeek {
+                year: 2026,
+                week: 4
+            })
+        );
+
+        let m = CalendarPeriod::Month(YearMonth {
+            year: 2026,
+            month: 12,
+        });
+        assert_eq!(m.label(), "2026-12");
+        assert_eq!(
+            m.next(),
+            CalendarPeriod::Month(YearMonth {
+                year: 2027,
+                month: 1
+            })
+        );
+    }
+
+    #[test]
+    fn calendar_period_orders_within_an_arm() {
+        let a = CalendarPeriod::Day(day(2026, 1, 5));
+        let b = CalendarPeriod::Day(day(2026, 1, 6));
+        assert!(a < b);
+        assert!(a.next() == b);
     }
 }

@@ -112,6 +112,7 @@ fn capture_writes_the_contract() {
     for m in MONTHS {
         let ts = month_start_nanos(m);
         capture.record_fill_row(
+            m,
             ts,
             long,
             OrderSide::Buy,
@@ -120,6 +121,7 @@ fn capture_writes_the_contract() {
             fee_per_month / Decimal::from(2),
         );
         capture.record_fill_row(
+            m,
             ts,
             short,
             OrderSide::Sell,

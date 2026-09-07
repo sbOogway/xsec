@@ -1,7 +1,8 @@
 //! The top-5 momentum strategy: rank the universe by a composite fast/medium/
-//! slow momentum score, go long the top names, hold a day, repeat —
-//! flattening to cash whenever BTC's trend regime filter is negative.
-//! Everything that is not the signal — the rebalance clock, the price
+//! slow momentum score, go long the top names, hold for
+//! `--number-holding-periods` of the `--holding-period` clock unit, then turn
+//! the book over — flattening to cash whenever BTC's trend regime filter is
+//! negative. Everything that is not the signal — the rebalance clock, the price
 //! buffers, artifact capture, notional-sized orders — comes from
 //! [`crate::strategy::common::StrategyRuntime`].
 
@@ -19,7 +20,7 @@ use rust_decimal::{Decimal, prelude::ToPrimitive};
 
 use crate::{
     config::RunConfig,
-    period::CalendarDay,
+    period::{CalendarPeriod, RebalancePeriod},
     sizing::{self, Conviction},
     strategy::common::{Market, RuntimeState, StrategyRuntime, btc_instrument_id, n_day_return},
 };
@@ -44,7 +45,7 @@ pub struct Top5MomentumFiltered {
     /// Signal-agnostic backtest state: universe ids, rebalance clock, rolling
     /// price buffers, capture handle. Filled in `on_start`.
     #[builder(skip)]
-    runtime: RuntimeState<CalendarDay>,
+    runtime: RuntimeState<CalendarPeriod>,
 
     /// `BTC`'s instrument id, resolved once in `on_start` for the regime
     /// filter.
@@ -59,16 +60,19 @@ nautilus_strategy!(Top5MomentumFiltered, {
 });
 
 impl StrategyRuntime for Top5MomentumFiltered {
-    type Period = CalendarDay;
+    type Period = CalendarPeriod;
 
-    fn runtime(&self) -> &RuntimeState<CalendarDay> {
+    fn runtime(&self) -> &RuntimeState<CalendarPeriod> {
         &self.runtime
     }
-    fn runtime_mut(&mut self) -> &mut RuntimeState<CalendarDay> {
+    fn runtime_mut(&mut self) -> &mut RuntimeState<CalendarPeriod> {
         &mut self.runtime
     }
     fn market(&self) -> Market {
         config::MARKET
+    }
+    fn current_period(&self, ts_nanos: u64) -> CalendarPeriod {
+        self.config.holding_period.period_at(ts_nanos)
     }
 }
 
@@ -85,15 +89,6 @@ impl Debug for Top5MomentumFiltered {
 
 impl DataActor for Top5MomentumFiltered {
     fn on_start(&mut self) -> anyhow::Result<()> {
-        // Defense in depth: `config::build` already rejects this, but the
-        // rebalance path below assumes a one-day hold.
-        if self.config.holding_days != 1 {
-            return Err(anyhow::anyhow!(
-                "holding_days={} is not supported: the rebalance path assumes a one-day hold",
-                self.config.holding_days
-            ));
-        }
-
         let run = self.run.clone();
         let rows = config::config_rows(&self.config);
         self.open_capture(&run, &rows)?;
@@ -138,6 +133,8 @@ impl DataActor for Top5MomentumFiltered {
             .and_then(|queue| n_day_return(queue, self.config.regime_lookback_days as usize));
         let regime_is_positive = btc_return.is_some_and(|r| r >= Decimal::ZERO);
 
+        // The regime filter runs every period, whatever the rebalance cadence:
+        // the book flattens to cash the moment BTC's trend turns negative.
         if !regime_is_positive {
             self.close_all();
             let latest_close = self.runtime().latest_closes();
@@ -149,13 +146,23 @@ impl DataActor for Top5MomentumFiltered {
             return anyhow::Ok(());
         }
 
-        // `close_expired` ages out on a strict `>`, and daily rebalances land
-        // exactly one day apart, so yesterday's legs would never be strictly
-        // older than a full `holding_days`. A day's cushion (mirroring
-        // momentum's 27-vs-30-day gap) ensures they clear before today's legs
-        // are opened.
-        let max_age_days = self.config.holding_days as u64 - 1;
-        self.close_expired(event, max_age_days);
+        // Re-rank and turn the book over only once per `number_holding_periods`
+        // clock units. Between turnovers the book rides — a name is held until
+        // the next turnover regardless of where it ranks (holding only the
+        // still-top-`top_n` names is a follow-up).
+        if let Some(last) = self.runtime().last_period {
+            let mut due = last;
+            for _ in 0..self.config.number_holding_periods {
+                due = due.next();
+            }
+            if period < due {
+                return anyhow::Ok(());
+            }
+        }
+
+        // Full turnover: flatten the book, then rebuild it from this period's
+        // top `top_n`.
+        self.close_all();
 
         // --- signal: composite fast/medium/slow momentum score, per name ---
         let instruments = self.runtime().instruments.clone();
@@ -179,7 +186,7 @@ impl DataActor for Top5MomentumFiltered {
         scores.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
         scores.truncate(self.config.top_n);
 
-        log::info!("scores today {scores:#?}");
+        log::info!("rebalance scores {scores:#?}");
 
         let budget = self.config.risk_fraction * equity.to_f64().unwrap_or(0.0);
         let allocation = sizing::allocate(

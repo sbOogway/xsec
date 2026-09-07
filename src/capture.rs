@@ -20,8 +20,9 @@
 //!
 //! `RunCapture` is generic over [`crate::period::RebalancePeriod`]: the
 //! `period` / `period_end_date` columns and the finalisation logic below work
-//! the same way whatever cadence a strategy rebalances on — a calendar month
-//! or an ISO week are both just implementations of that trait.
+//! the same way whatever cadence a strategy rebalances on — a calendar month,
+//! an ISO week and a run-time-selected `CalendarPeriod` are all just
+//! implementations of that trait.
 
 use std::{
     collections::{BTreeMap, HashMap},
@@ -120,13 +121,16 @@ impl<P: RebalancePeriod> RunCapture<P> {
     }
 
     /// Record an `OrderFilled` event: one fills row now, plus the fee and fill
-    /// count folded into that rebalance period's accrual.
-    pub fn record_fill(&mut self, event: &OrderFilled) {
+    /// count folded into `period`'s accrual. `period` is the rebalance period
+    /// the fill's timestamp falls in (the caller resolves it via
+    /// `StrategyRuntime::current_period`).
+    pub fn record_fill(&mut self, period: P, event: &OrderFilled) {
         let fee = event
             .commission
             .map(|m| m.as_decimal())
             .unwrap_or(Decimal::ZERO);
         self.record_fill_row(
+            period,
             event.ts_event.as_u64(),
             event.instrument_id,
             event.order_side,
@@ -137,9 +141,12 @@ impl<P: RebalancePeriod> RunCapture<P> {
     }
 
     /// The primitive behind [`record_fill`](Self::record_fill), split out so it
-    /// can be exercised without constructing a full `OrderFilled`.
+    /// can be exercised without constructing a full `OrderFilled`. The columns
+    /// it writes are the `fills.csv` contract, hence the wide signature.
+    #[allow(clippy::too_many_arguments)]
     pub fn record_fill_row(
         &mut self,
+        period: P,
         ts_event: u64,
         instrument: InstrumentId,
         order_side: OrderSide,
@@ -147,7 +154,6 @@ impl<P: RebalancePeriod> RunCapture<P> {
         fill_price: Decimal,
         fee_usdt: Decimal,
     ) {
-        let period = P::from_nanos(ts_event);
         let _ = writeln!(
             self.fills,
             "{},{},{},{},{},{},{},{}",
