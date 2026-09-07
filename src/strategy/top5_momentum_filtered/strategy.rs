@@ -82,6 +82,8 @@ impl DataActor for Top5MomentumFiltered {
     }
 
     fn on_bar(&mut self, bar: &Bar) -> anyhow::Result<()> {
+        log::debug!("bar {} @ {}", bar.instrument_id(), bar.ts_event);
+        self.runtime_mut().record_close(bar);
         anyhow::Ok(())
     }
 
