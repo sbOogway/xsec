@@ -19,10 +19,12 @@ use rust_decimal::{Decimal, prelude::ToPrimitive};
 
 use crate::{
     config::RunConfig,
-    data::structure::BoundedQueue,
     period::IsoWeek,
     sizing::{self, Conviction},
-    strategy::runtime::{Market, RuntimeState, StrategyRuntime},
+    strategy::{
+        common::{btc_instrument_id, n_day_return},
+        runtime::{Market, RuntimeState, StrategyRuntime},
+    },
 };
 
 use super::config::{self, Config};
@@ -115,7 +117,7 @@ impl DataActor for Top5MomentumFiltered {
 
         let equity = self.usdt_equity();
 
-        let btc = btc_instrument_id(&self.run.bases);
+        let btc = btc_instrument_id(&self.run.bases, config::VENUE);
         let btc_return = self
             .runtime()
             .prices
@@ -197,27 +199,4 @@ impl DataActor for Top5MomentumFiltered {
         self.mark_rebalanced(period);
         anyhow::Ok(())
     }
-}
-
-/// The `N`-day return `(P_now - P_{now-N}) / P_{now-N}`, needing `N + 1`
-/// price points in `queue`. `None` if the buffer isn't deep enough yet
-/// (still warming up) or the reference price is zero.
-fn n_day_return(queue: &BoundedQueue<Decimal>, days: usize) -> Option<Decimal> {
-    let len = queue.inner.len();
-    if len <= days {
-        return None;
-    }
-    let now = *queue.inner.back()?;
-    let past = *queue.inner.get(len - 1 - days)?;
-    (!past.is_zero()).then(|| (now - past) / past)
-}
-
-/// The instrument id for `BTC` within `bases`, matched case-insensitively.
-/// `config::build` guarantees `bases` contains it.
-fn btc_instrument_id(bases: &[String]) -> InstrumentId {
-    let base = bases
-        .iter()
-        .find(|base| base.eq_ignore_ascii_case("BTC"))
-        .expect("config::build requires BTC in the universe");
-    InstrumentId::from(format!("{base}USDT-LINEAR.{}", config::VENUE).as_str())
 }

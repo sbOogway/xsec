@@ -9,6 +9,7 @@
 //! The binary picks a strategy with a clap subcommand ([`StrategyKind`]); each
 //! variant carries that strategy's [`clap::Args`].
 
+pub mod common;
 pub mod momentum;
 pub mod runtime;
 pub mod top5_momentum_filtered;
