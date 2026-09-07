@@ -28,7 +28,7 @@ UUID := $(UUID)
 # (--uuid, --universe, --date-*, --starting-balance).
 STRATEGY ?= momentum
 
-.PHONY: tearsheet backtest report optimize
+.PHONY: tearsheet backtest report optimize snapshot_bybit_top
 
 ## Run the backtest and build the tearsheet for $(UUID).
 tearsheet: backtest report
@@ -48,3 +48,6 @@ report:
 ## best trial out-of-sample. Extra flags: make optimize OPT_ARGS="--n-trials 200"
 optimize:
 	uv run --project analysis analysis/optimize.py $(OPT_ARGS)
+
+snapshot_bybit_top:
+	./scripts/bybit_turnover_ranking.sh | tac | cut -d':' -f1 | rg 'USDT$$' | head -30 | sed 's/USDT//' > coins/bybit_top_$(shell date --utc +%Y-%m-%dT%H:%M:%S%Z).txt
