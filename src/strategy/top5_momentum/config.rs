@@ -66,7 +66,7 @@ pub struct Args {
     /// Within-book tilt toward higher-conviction names. `0.0` = equal dollars
     /// per leg.
     #[arg(long, default_value_t = 0.0)]
-    pub signal_tilt: f64,
+    pub allocation_tilt: f64,
 
     /// Holding period, in weeks. Only `1` is currently supported.
     #[arg(long, default_value_t = 1)]
@@ -87,7 +87,7 @@ pub struct Config {
     /// Gross exposure as a fraction of equity, per rebalance.
     pub risk_fraction: f64,
     /// Within-book allocation tilt toward higher-conviction names (0 = equal).
-    pub signal_tilt: f64,
+    pub allocation_tilt: f64,
     pub holding_weeks: u16,
 }
 
@@ -140,9 +140,9 @@ pub fn build(args: &Args, bases: &[String]) -> Result<Config> {
         args.risk_fraction
     );
     ensure!(
-        args.signal_tilt.is_finite() && args.signal_tilt >= 0.0,
-        "--signal-tilt must be finite and >= 0, got {}",
-        args.signal_tilt
+        args.allocation_tilt.is_finite() && args.allocation_tilt >= 0.0,
+        "--allocation-tilt must be finite and >= 0, got {}",
+        args.allocation_tilt
     );
 
     ensure!(
@@ -166,7 +166,7 @@ pub fn build(args: &Args, bases: &[String]) -> Result<Config> {
         top_n: args.top_n,
         regime_lookback_days: args.regime_lookback_days,
         risk_fraction: args.risk_fraction,
-        signal_tilt: args.signal_tilt,
+        allocation_tilt: args.allocation_tilt,
         holding_weeks: args.holding_weeks,
     })
 }
@@ -187,7 +187,7 @@ pub fn config_rows(cfg: &Config) -> Vec<(String, String)> {
             cfg.regime_lookback_days.to_string(),
         ),
         ("risk_fraction".to_string(), cfg.risk_fraction.to_string()),
-        ("signal_tilt".to_string(), cfg.signal_tilt.to_string()),
+        ("allocation_tilt".to_string(), cfg.allocation_tilt.to_string()),
         ("holding_weeks".to_string(), cfg.holding_weeks.to_string()),
     ]
 }
@@ -239,7 +239,7 @@ mod tests {
         assert_eq!(cfg.top_n, 5);
         assert_eq!(cfg.regime_lookback_days, 20);
         assert_eq!(cfg.risk_fraction, 0.8);
-        assert_eq!(cfg.signal_tilt, 0.0);
+        assert_eq!(cfg.allocation_tilt, 0.0);
         assert_eq!(cfg.holding_weeks, 1);
     }
 
