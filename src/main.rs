@@ -22,8 +22,8 @@ use xsec::{
     data,
     strategy::{
         StrategyKind,
-        common::Harness,
         momentum::{XSectionalMomentum, config as momentum},
+        runtime::StrategyRuntime,
     },
 };
 
@@ -51,7 +51,13 @@ fn main() -> anyhow::Result<()> {
                 .config(strategy_config)
                 .build();
             let instrument_ids = momentum::instrument_ids(&run.bases);
-            run_engine(&run, momentum::VENUE, momentum::TIMEFRAME, &instrument_ids, strategy)?;
+            run_engine(
+                &run,
+                momentum::VENUE,
+                momentum::TIMEFRAME,
+                &instrument_ids,
+                strategy,
+            )?;
         }
     }
 
@@ -61,7 +67,7 @@ fn main() -> anyhow::Result<()> {
 /// Boot the configured [`ENVIRONMENT`] for `strategy`, loading the venue,
 /// instruments and bars it needs. `venue` / `timeframe` / `instrument_ids` are
 /// the strategy's market surface, read from its `config.rs`.
-fn run_engine<S: Harness>(
+fn run_engine<S: StrategyRuntime>(
     run: &RunConfig,
     venue: &str,
     timeframe: BarAggregation,

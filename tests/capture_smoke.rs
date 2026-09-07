@@ -6,6 +6,11 @@
 //! 2-symbol, 6-month scenario and asserts that contract, without booting the
 //! full backtest engine (which would need network/data fixtures and be
 //! non-deterministic).
+//!
+//! `RunCapture` is generic over the rebalance period ([`RebalancePeriod`], #20)
+//! — a second, smaller test below exercises the same lifecycle instantiated
+//! with [`IsoWeek`] instead of [`YearMonth`], so both cadences are proven, not
+//! just that the trait compiles.
 
 use std::collections::HashMap;
 
@@ -13,24 +18,42 @@ use rust_decimal::Decimal;
 use tempfile::tempdir;
 
 use nautilus_model::{enums::OrderSide, identifiers::InstrumentId};
-use xsec::capture::{RunCapture, RunConfig, YearMonth};
+use xsec::capture::{RunCapture, RunConfig};
+use xsec::period::{IsoWeek, YearMonth};
 
 // The schema downstream tooling depends on — pinned here as literals so a
 // change to the capture headers has to be a deliberate change to this test too.
-const LEGS_HEADER: &str =
-    "run_id,month,instrument_id,side,entry_price,exit_price,per_leg_return,notional_usdt";
-const PORTFOLIO_HEADER: &str = "run_id,month,n_long,n_short,gross_return,fee_paid_usdt,net_return,equity_end_of_month_usdt,n_fills,fills_ref";
+const LEGS_HEADER: &str = "run_id,period,period_end_date,instrument_id,side,entry_price,exit_price,per_leg_return,notional_usdt";
+const PORTFOLIO_HEADER: &str = "run_id,period,period_end_date,n_long,n_short,gross_return,fee_paid_usdt,net_return,equity_end_of_period_usdt,n_fills,fills_ref";
 const FILLS_HEADER: &str =
     "run_id,ts_event,instrument_id,side,order_side,quantity,fill_price,fee_usdt";
 
 const RUN_ID: &str = "test-0000-run";
 const MONTHS: [YearMonth; 6] = [
-    YearMonth { year: 2025, month: 1 },
-    YearMonth { year: 2025, month: 2 },
-    YearMonth { year: 2025, month: 3 },
-    YearMonth { year: 2025, month: 4 },
-    YearMonth { year: 2025, month: 5 },
-    YearMonth { year: 2025, month: 6 },
+    YearMonth {
+        year: 2025,
+        month: 1,
+    },
+    YearMonth {
+        year: 2025,
+        month: 2,
+    },
+    YearMonth {
+        year: 2025,
+        month: 3,
+    },
+    YearMonth {
+        year: 2025,
+        month: 4,
+    },
+    YearMonth {
+        year: 2025,
+        month: 5,
+    },
+    YearMonth {
+        year: 2025,
+        month: 6,
+    },
 ];
 
 fn month_start_nanos(m: YearMonth) -> u64 {
@@ -75,7 +98,8 @@ fn capture_writes_the_contract() {
         ("signal_tilt".to_string(), "0".to_string()),
     ];
 
-    let mut capture = RunCapture::open_in(dir.path(), &cfg, &strategy_rows).unwrap();
+    let mut capture: RunCapture<YearMonth> =
+        RunCapture::open_in(dir.path(), &cfg, &strategy_rows).unwrap();
 
     // Exit mark for every leg: long +10%, short instrument -10% (=> short leg +10%).
     let mut exits: HashMap<InstrumentId, Decimal> = HashMap::new();
@@ -87,8 +111,22 @@ fn capture_writes_the_contract() {
 
     for m in MONTHS {
         let ts = month_start_nanos(m);
-        capture.record_fill_row(ts, long, OrderSide::Buy, Decimal::from(1), Decimal::from(100), fee_per_month / Decimal::from(2));
-        capture.record_fill_row(ts, short, OrderSide::Sell, Decimal::from(1), Decimal::from(100), fee_per_month / Decimal::from(2));
+        capture.record_fill_row(
+            ts,
+            long,
+            OrderSide::Buy,
+            Decimal::from(1),
+            Decimal::from(100),
+            fee_per_month / Decimal::from(2),
+        );
+        capture.record_fill_row(
+            ts,
+            short,
+            OrderSide::Sell,
+            Decimal::from(1),
+            Decimal::from(100),
+            fee_per_month / Decimal::from(2),
+        );
 
         capture.record_rebalance(
             m,
@@ -134,40 +172,152 @@ fn capture_writes_the_contract() {
     assert_eq!(cfg_map["universe_path"], "universe.txt");
     assert_eq!(cfg_map["argv"], "xsectional-rs --uuid test-0000-run");
 
-    // --- legs schema: month label, side vocabulary, 6dp returns ---
+    // --- legs schema: period label + end date, side vocabulary, 6dp returns ---
     for row in &legs.rows {
-        assert_eq!(row.len(), 8);
+        assert_eq!(row.len(), 9);
         assert_eq!(&row[0], RUN_ID);
-        assert!(row[1].starts_with("2025-"), "month is YYYY-MM: {}", row[1]);
-        assert!(matches!(row[3].as_str(), "long" | "short"), "side: {}", row[3]);
-        assert_eq!(row[6].split('.').nth(1).map(str::len), Some(6), "6dp return: {}", row[6]);
-        assert_eq!(&row[6], "0.100000", "both legs designed to return +10%");
+        assert!(row[1].starts_with("2025-"), "period is YYYY-MM: {}", row[1]);
+        assert!(
+            row[2].starts_with("2025-"),
+            "period_end_date is YYYY-MM-DD: {}",
+            row[2]
+        );
+        assert!(
+            matches!(row[4].as_str(), "long" | "short"),
+            "side: {}",
+            row[4]
+        );
+        assert_eq!(
+            row[7].split('.').nth(1).map(str::len),
+            Some(6),
+            "6dp return: {}",
+            row[7]
+        );
+        assert_eq!(&row[7], "0.100000", "both legs designed to return +10%");
     }
 
-    // --- portfolio arithmetic: account-level returns off month-start equity ---
+    // --- portfolio arithmetic: account-level returns off period-start equity ---
     // Each month: two legs at +10% on 50 USDT notional => 10 USDT leg PnL,
     // against 1000 USDT opening equity => gross_return == 0.01.
     // net_return == gross_return - fee_paid / equity_start.
     let expected_gross = (Decimal::from(10) / equity).round_dp(6);
     for row in &portfolio.rows {
-        assert_eq!(row.len(), 10);
-        assert_eq!(&row[2], "1", "n_long");
-        assert_eq!(&row[3], "1", "n_short");
-        let gross: Decimal = row[4].parse().unwrap();
-        let fee: Decimal = row[5].parse().unwrap();
-        let net: Decimal = row[6].parse().unwrap();
-        assert_eq!(gross, expected_gross, "gross_return = leg PnL / equity_start");
+        assert_eq!(row.len(), 11);
+        assert!(
+            row[2].starts_with("2025-"),
+            "period_end_date is YYYY-MM-DD: {}",
+            row[2]
+        );
+        assert_eq!(&row[3], "1", "n_long");
+        assert_eq!(&row[4], "1", "n_short");
+        let gross: Decimal = row[5].parse().unwrap();
+        let fee: Decimal = row[6].parse().unwrap();
+        let net: Decimal = row[7].parse().unwrap();
+        assert_eq!(
+            gross, expected_gross,
+            "gross_return = leg PnL / equity_start"
+        );
         let expected_net = (gross - fee / equity).round_dp(6);
-        assert_eq!(net, expected_net, "net_return identity for month {}", row[1]);
-        assert_eq!(&row[8], "2", "n_fills");
-        assert!(row[9].ends_with("/fills.csv"), "fills_ref: {}", row[9]);
+        assert_eq!(
+            net, expected_net,
+            "net_return identity for period {}",
+            row[1]
+        );
+        assert_eq!(&row[9], "2", "n_fills");
+        assert!(row[10].ends_with("/fills.csv"), "fills_ref: {}", row[10]);
     }
 
-    // n_fills in portfolio matches fills.csv rows for that month
+    // n_fills in portfolio matches fills.csv rows for that period
     assert_eq!(
-        portfolio.rows.iter().map(|r| r[8].parse::<usize>().unwrap()).sum::<usize>(),
+        portfolio
+            .rows
+            .iter()
+            .map(|r| r[9].parse::<usize>().unwrap())
+            .sum::<usize>(),
         fills.rows.len(),
     );
+}
+
+/// Same lifecycle as [`capture_writes_the_contract`], instantiated with
+/// [`IsoWeek`] instead of [`YearMonth`] — proves `RunCapture<P>` works for a
+/// second, independently-implemented `RebalancePeriod`, not just that it
+/// compiles against one.
+#[test]
+fn capture_writes_the_contract_for_a_weekly_cadence() {
+    let dir = tempdir().unwrap();
+    let long = InstrumentId::from("BTCUSDT-LINEAR.BYBIT");
+    let run_id = "test-0001-weekly";
+
+    let cfg = RunConfig {
+        run_id: run_id.to_string(),
+        strategy: "top5_momentum".to_string(),
+        date_start: "2026-01-01".to_string(),
+        date_end: "2026-02-01".to_string(),
+        bases: vec!["BTC".to_string()],
+        starting_balance: "1000 USDT".to_string(),
+        universe_path: "universe.txt".to_string(),
+        argv: "xsec --uuid test-0001-weekly".to_string(),
+    };
+
+    let mut capture: RunCapture<IsoWeek> = RunCapture::open_in(dir.path(), &cfg, &[]).unwrap();
+
+    let weeks = [
+        IsoWeek {
+            year: 2026,
+            week: 2,
+        },
+        IsoWeek {
+            year: 2026,
+            week: 3,
+        },
+        IsoWeek {
+            year: 2026,
+            week: 4,
+        },
+    ];
+    let equity = Decimal::from(1000);
+    let mut exits: HashMap<InstrumentId, Decimal> = HashMap::new();
+    exits.insert(long, Decimal::from(110));
+
+    for w in weeks {
+        capture.record_rebalance(
+            w,
+            equity,
+            vec![(long, OrderSide::Buy, Decimal::from(100), 100.0)],
+        );
+        capture.finalise_completed(w, &exits, equity);
+    }
+    capture.finish(&exits, equity);
+    drop(capture);
+
+    let run_dir = dir.path().join(run_id);
+    let legs = read_csv(run_dir.join("legs.csv"));
+    let portfolio = read_csv(run_dir.join("portfolio.csv"));
+
+    assert_eq!(legs.header, LEGS_HEADER);
+    assert_eq!(portfolio.header, PORTFOLIO_HEADER);
+    assert_eq!(portfolio.rows.len(), 3, "one portfolio row per entry week");
+    assert_eq!(legs.rows.len(), 3, "one leg per week for three weeks");
+
+    for row in &legs.rows {
+        assert!(
+            row[1].starts_with("2026-W"),
+            "period is an ISO week label: {}",
+            row[1]
+        );
+        assert_eq!(
+            &row[7], "0.100000",
+            "the one leg is designed to return +10%"
+        );
+    }
+    for row in &portfolio.rows {
+        assert!(
+            row[1].starts_with("2026-W"),
+            "period is an ISO week label: {}",
+            row[1]
+        );
+        assert_eq!(&row[9], "0", "no fills recorded in this smoke test");
+    }
 }
 
 struct Csv {
@@ -176,8 +326,8 @@ struct Csv {
 }
 
 fn read_csv(path: std::path::PathBuf) -> Csv {
-    let text = std::fs::read_to_string(&path)
-        .unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
+    let text =
+        std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
     let mut lines = text.lines();
     let header = lines.next().unwrap_or_default().to_string();
     let rows = lines

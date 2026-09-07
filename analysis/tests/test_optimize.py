@@ -23,8 +23,8 @@ sys.path.insert(0, str(ANALYSIS_DIR))
 import optimize  # noqa: E402
 
 PORTFOLIO_HEADER = (
-    "run_id,month,n_long,n_short,gross_return,fee_paid_usdt,"
-    "net_return,equity_end_of_month_usdt,n_fills,fills_ref\n"
+    "run_id,period,period_end_date,n_long,n_short,gross_return,fee_paid_usdt,"
+    "net_return,equity_end_of_period_usdt,n_fills,fills_ref\n"
 )
 
 
@@ -43,7 +43,7 @@ def write_run(runs: Path, uuid: str, *, monthly_returns: list[float]) -> None:
     run_dir = runs / uuid
     run_dir.mkdir(parents=True, exist_ok=True)
     rows = "".join(
-        f"{uuid},2025-{m:02d},5,5,{r:.6f},1.0,{r:.6f},{1000 * (1 + r):.2f},10,runs/{uuid}/fills.csv\n"
+        f"{uuid},2025-{m:02d},2025-{m:02d}-28,5,5,{r:.6f},1.0,{r:.6f},{1000 * (1 + r):.2f},10,runs/{uuid}/fills.csv\n"
         for m, r in enumerate(monthly_returns, start=1)
     )
     (run_dir / "portfolio.csv").write_text(PORTFOLIO_HEADER + rows)

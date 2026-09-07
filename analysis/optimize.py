@@ -177,10 +177,10 @@ def load_net_returns(uuid: str):
         raise BacktestFailed(f"no portfolio.csv for run {uuid}")
 
     frame = pd.read_csv(path)
-    if frame.empty or "net_return" not in frame.columns or "month" not in frame.columns:
-        raise BacktestFailed(f"portfolio.csv for run {uuid} is empty or missing month/net_return")
+    if frame.empty or "net_return" not in frame.columns or "period" not in frame.columns:
+        raise BacktestFailed(f"portfolio.csv for run {uuid} is empty or missing period/net_return")
 
-    frame = frame.sort_values("month")
+    frame = frame.sort_values("period")
     return pd.Series(frame["net_return"].astype(float).values, name="net_return")
 
 
@@ -364,7 +364,7 @@ def main(argv: list[str] | None = None) -> None:
             f"warning: the out-of-sample window is only {month_span(oos_start, oos_end)} month(s) "
             f"long, <= the search space's max lookback_months ({int(max_lookback)}). The strategy "
             "needs lookback_months of bars to accumulate before it trades at all (see "
-            "start_universe's warm-up request in src/strategy/common.rs), so a best trial with a "
+            "start_universe's warm-up request in src/strategy/runtime.rs), so a best trial with a "
             "long lookback can show 0% out-of-sample simply because it never got a chance to "
             "trade — that's a too-short window, not evidence of overfitting. Widen "
             "--date-start/--date-end or lower --split-ratio if you see that.",

@@ -6,7 +6,7 @@
 //! bottom `percentile`, sized to a fraction of account equity, and holds for
 //! one month. [`config`] owns the knobs and the market; [`strategy`] owns the
 //! ranking and the budget split — everything else comes from
-//! [`crate::strategy::common`].
+//! [`crate::strategy::runtime`].
 
 pub mod config;
 pub mod strategy;

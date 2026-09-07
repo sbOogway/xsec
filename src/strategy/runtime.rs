@@ -1,25 +1,30 @@
 //! Signal-agnostic backtest wiring shared by every strategy in
 //! [`crate::strategy`].
 //!
-//! A concrete strategy embeds a [`HarnessState`] (conventionally the field
-//! `harness`) and writes a three-method `impl` of [`Harness`]; that unlocks the
-//! rest — the rebalance clock, warm-up requests, the rolling price buffers,
-//! artifact capture and notional-sized market orders — as provided methods.
-//! What stays in the strategy's own `strategy.rs` is the signal: how it ranks
-//! the universe and how it splits the budget across legs.
+//! A concrete strategy embeds a [`RuntimeState`] (conventionally the field
+//! `runtime`) and writes a three-method `impl` of [`StrategyRuntime`]; that
+//! unlocks the rest — the rebalance clock, warm-up requests, the rolling price
+//! buffers, artifact capture and notional-sized market orders — as provided
+//! methods. What stays in the strategy's own `strategy.rs` is the signal: how
+//! it ranks the universe and how it splits the budget across legs.
+//!
+//! The rebalance clock and the capture join key both derive from the same
+//! [`crate::period::RebalancePeriod`] value (`StrategyRuntime::Period`) — a
+//! strategy declares its cadence once, rather than keying its clock guard and
+//! its `legs.csv`/`portfolio.csv` rows off two independent definitions of
+//! "what period is this."
 
 use std::{collections::HashMap, fmt::Debug, time::Duration};
 
 use anyhow::{Result, anyhow};
-use chrono::{DateTime, Datelike};
 use nautilus_common::actor::DataActorNative;
 use nautilus_common::timer::TimeEvent;
 use nautilus_model::{
     data::Bar,
     enums::{BarAggregation, OrderSide},
+    events::OrderFilled,
     identifiers::{InstrumentId, Venue},
     instruments::Instrument,
-    events::OrderFilled,
     types::Quantity,
 };
 use nautilus_trading::{Strategy, StrategyNative};
@@ -29,25 +34,42 @@ use crate::{
     capture::RunCapture,
     config::RunConfig,
     data::{get_bar_type, structure::BoundedQueue},
+    period::RebalancePeriod,
 };
 
 /// Per-run state every strategy carries: the resolved universe, the rebalance
 /// clock marker, the rolling close-price buffers and the artifact-capture
-/// handle. `Default`-constructed by the builder; populated in `on_start`.
-#[derive(Default)]
-pub struct HarnessState {
+/// handle. Populated in `on_start`.
+///
+/// Generic over the strategy's own rebalance period type `P` (a calendar
+/// month, an ISO week, ...) — see [`crate::period::RebalancePeriod`].
+pub struct RuntimeState<P: RebalancePeriod> {
     /// Instrument ids for the run's universe, resolved in `on_start`.
     pub instruments: Vec<InstrumentId>,
-    /// Calendar month of the last rebalance; the `on_time_event` guard.
-    pub last_month: u32,
+    /// The period of the last rebalance; the `on_time_event` guard.
+    pub last_period: Option<P>,
     /// Rolling close-price buffer per instrument (depth = the formation window).
     pub prices: HashMap<InstrumentId, BoundedQueue<Decimal>>,
     /// Per-run artifact capture (`runs/<uuid>/{legs,portfolio,fills}.csv`).
     /// `None` until `on_start` opens the files.
-    pub capture: Option<RunCapture>,
+    pub capture: Option<RunCapture<P>>,
 }
 
-impl HarnessState {
+// Not `#[derive(Default)]`: the derive macro would add an unwanted `P:
+// Default` bound (none of these fields need one — `Option<P>` is `None`
+// regardless of what `P` is).
+impl<P: RebalancePeriod> Default for RuntimeState<P> {
+    fn default() -> Self {
+        Self {
+            instruments: Vec::new(),
+            last_period: None,
+            prices: HashMap::new(),
+            capture: None,
+        }
+    }
+}
+
+impl<P: RebalancePeriod> RuntimeState<P> {
     /// The most recent close seen per instrument — the exit mark used to price
     /// out legs one rebalance after entry.
     pub fn latest_closes(&self) -> HashMap<InstrumentId, Decimal> {
@@ -67,7 +89,7 @@ impl HarnessState {
 }
 
 /// The market a strategy trades and the bar size it ranks on. Each strategy's
-/// `config.rs` owns these constants; the harness needs them to build bar types
+/// `config.rs` owns these constants; the runtime needs them to build bar types
 /// and to look up the venue account.
 #[derive(Clone, Copy, Debug)]
 pub struct Market {
@@ -81,26 +103,29 @@ impl Market {
     }
 }
 
-/// The calendar month (`1..=12`) a time event falls in, UTC.
-pub fn month_of(event: &TimeEvent) -> u32 {
-    DateTime::from_timestamp_nanos(event.ts_event.as_u64() as i64).month()
-}
-
 /// Backtest plumbing shared by every strategy, unlocked once a strategy exposes
-/// its [`HarnessState`] and [`Market`].
+/// its [`RuntimeState`], its [`Market`] and its rebalance [`RebalancePeriod`].
 ///
-/// Implement the three accessors; everything else is provided. The trait bounds
-/// are exactly what [`nautilus_backtest`](nautilus_backtest)'s `add_strategy`
-/// asks for, so any type that can be added to the engine can implement this.
-pub trait Harness: Strategy + StrategyNative + DataActorNative + Debug + Sized + 'static {
-    fn harness(&self) -> &HarnessState;
-    fn harness_mut(&mut self) -> &mut HarnessState;
+/// Implement the `Period` associated type and the three accessors; everything
+/// else is provided. The trait bounds are exactly what
+/// [`nautilus_backtest`](nautilus_backtest)'s `add_strategy` asks for, so any
+/// type that can be added to the engine can implement this.
+pub trait StrategyRuntime:
+    Strategy + StrategyNative + DataActorNative + Debug + Sized + 'static
+{
+    /// This strategy's rebalance cadence (a calendar month, an ISO week, ...).
+    /// Also the join key `RunCapture` groups `legs.csv` / `portfolio.csv` rows
+    /// by — one declaration drives both the clock and the capture schema.
+    type Period: RebalancePeriod;
+
+    fn runtime(&self) -> &RuntimeState<Self::Period>;
+    fn runtime_mut(&mut self) -> &mut RuntimeState<Self::Period>;
     fn market(&self) -> Market;
 
     /// Open the run's capture files: the shared config rows plus whatever rows
     /// this strategy contributes. Call once from `on_start`.
     fn open_capture(&mut self, run: &RunConfig, strategy_rows: &[(String, String)]) -> Result<()> {
-        self.harness_mut().capture = Some(RunCapture::open(run, strategy_rows)?);
+        self.runtime_mut().capture = Some(RunCapture::open(run, strategy_rows)?);
         Ok(())
     }
 
@@ -112,41 +137,48 @@ pub trait Harness: Strategy + StrategyNative + DataActorNative + Debug + Sized +
             .ok_or_else(|| anyhow!("formation window must be > 0"))?;
         let timeframe = self.market().timeframe;
 
-        self.clock()
-            .set_timer("DAILY", Duration::from_hours(24), None, None, None, None, None)?;
+        self.clock().set_timer(
+            "DAILY",
+            Duration::from_hours(24),
+            None,
+            None,
+            None,
+            None,
+            None,
+        )?;
 
         for instrument in &instruments {
             let bar_type = get_bar_type(*instrument, timeframe);
             log::info!("[{instrument}] requesting {warmup} warm-up bars");
             self.request_bars(bar_type, None, None, Some(warmup), None, None)?;
             self.subscribe_bars(bar_type, None, None);
-            self.harness_mut()
+            self.runtime_mut()
                 .prices
                 .insert(*instrument, BoundedQueue::new(window));
         }
 
-        self.harness_mut().instruments = instruments;
+        self.runtime_mut().instruments = instruments;
         Ok(())
     }
 
-    /// The calendar month of `event` if it differs from the last rebalance,
-    /// else `None`. On a roll the caller does its work and then calls
-    /// [`mark_rebalanced`](Self::mark_rebalanced).
-    fn month_rolled(&self, event: &TimeEvent) -> Option<u32> {
-        let month = month_of(event);
-        (self.harness().last_month != month).then_some(month)
+    /// The rebalance period `event` falls in, if it differs from the last
+    /// rebalance, else `None`. On a roll the caller does its work and then
+    /// calls [`mark_rebalanced`](Self::mark_rebalanced) with the same period.
+    fn period_rolled(&self, event: &TimeEvent) -> Option<Self::Period> {
+        let period = Self::Period::from_nanos(event.ts_event.as_u64());
+        (self.runtime().last_period != Some(period)).then_some(period)
     }
 
-    /// Record that a rebalance for `month` has completed.
-    fn mark_rebalanced(&mut self, month: u32) {
-        self.harness_mut().last_month = month;
+    /// Record that a rebalance for `period` has completed.
+    fn mark_rebalanced(&mut self, period: Self::Period) {
+        self.runtime_mut().last_period = Some(period);
     }
 
-    /// Close every open position older than `holding_months`. With the hold
-    /// pinned to one month this turns the whole book over each rebalance; a
-    /// longer hold would keep younger tranches open.
-    fn close_expired(&mut self, event: &TimeEvent, holding_months: u16) {
-        let holding_ns = 27_u64 * holding_months as u64 * 86_400 * 1_000_000_000;
+    /// Close every open position older than `holding_days`. With the hold
+    /// pinned to one rebalance period this turns the whole book over each
+    /// rebalance; a longer hold would keep younger tranches open.
+    fn close_expired(&mut self, event: &TimeEvent, holding_days: u64) {
+        let holding_ns = holding_days * 86_400 * 1_000_000_000;
         let now = event.ts_event.as_u64();
         let open = self.cache().positions_open(None, None, None, None, None);
         for position in open {
@@ -154,6 +186,16 @@ pub trait Harness: Strategy + StrategyNative + DataActorNative + Debug + Sized +
             if age_ns > holding_ns {
                 let _ = self.close_position(&position, None, None, None, None, None, None);
             }
+        }
+    }
+
+    /// Close every open position unconditionally, regardless of age — for a
+    /// strategy that needs to flatten to cash outright (e.g. a regime filter
+    /// going red) rather than let positions age out.
+    fn close_all(&mut self) {
+        let open = self.cache().positions_open(None, None, None, None, None);
+        for position in open {
+            let _ = self.close_position(&position, None, None, None, None, None, None);
         }
     }
 
@@ -226,7 +268,7 @@ pub trait Harness: Strategy + StrategyNative + DataActorNative + Debug + Sized +
 
     /// Forward an `OrderFilled` to the capture layer.
     fn record_fill(&mut self, event: &OrderFilled) {
-        if let Some(capture) = self.harness_mut().capture.as_mut() {
+        if let Some(capture) = self.runtime_mut().capture.as_mut() {
             capture.record_fill(event);
         }
     }
@@ -235,8 +277,8 @@ pub trait Harness: Strategy + StrategyNative + DataActorNative + Debug + Sized +
     /// latest close and flush.
     fn finish_capture(&mut self) {
         let equity = self.usdt_equity();
-        let latest_close = self.harness().latest_closes();
-        if let Some(capture) = self.harness_mut().capture.as_mut() {
+        let latest_close = self.runtime().latest_closes();
+        if let Some(capture) = self.runtime_mut().capture.as_mut() {
             capture.finish(&latest_close, equity);
         }
     }

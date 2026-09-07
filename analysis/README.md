@@ -49,8 +49,8 @@ charts as base64 PNG, no external references). Four sections:
 - **Long vs short book** — per-side stats and cumulative/monthly PnL by book.
 - **Leg return distribution** — hit rate, avg win/loss, payoff, skew/kurtosis,
   a long/short histogram and the 10 best/worst legs.
-- **Per-month leg breakdown** — leg count, mean return, dispersion, min/max and
-  the long−short spread each month.
+- **Per rebalance period leg breakdown** — leg count, mean return, dispersion,
+  min/max and the long−short spread each period.
 
 A leg "wins" when `per_leg_return > 0` (a flat leg is not a win).
 
@@ -99,7 +99,7 @@ window dates, best params, both CAGRs, both run uuids — is written to
 
 **Caveat:** the strategy needs `lookback_months` monthly bars to accumulate
 before it trades at all (the warm-up request in `start_universe`,
-`src/strategy/common.rs`). If the out-of-sample slice is shorter than the
+`src/strategy/runtime.rs`). If the out-of-sample slice is shorter than the
 search space's longest `lookback_months` (12), a trial that picked a long
 lookback can show a flat 0% out-of-sample — it never got a chance to trade —
 which is a too-short window, not evidence of overfitting. `optimize.py` warns
@@ -111,8 +111,8 @@ test can trip it.
 
 | File | Used for |
 | --- | --- |
-| `runs/<uuid>/portfolio.csv` | `tearsheet.py`: headline return series — the `net_return` column, indexed by month-end |
-| `runs/<uuid>/legs.csv`      | `legs.py`: per-leg attribution, book split, return distribution and monthly breakdown |
+| `runs/<uuid>/portfolio.csv` | `tearsheet.py`: headline return series — the `net_return` column, indexed by `period_end_date` |
+| `runs/<uuid>/legs.csv`      | `legs.py`: per-leg attribution, book split, return distribution and per-period breakdown |
 | `runs/<uuid>/config.csv`    | not read yet; documents the run's parameters |
 | `runs/<uuid>/fills.csv`     | not read yet; per-`OrderFilled` rows for future per-trade attribution |
 
@@ -125,23 +125,29 @@ not installed.
 
 `legs.csv` per-leg return is a **close-to-close holding-period return**:
 `(exit_price - entry_price) / entry_price`, signed by side, where `entry_price`
-is the last completed monthly bar close before the entry rebalance and
-`exit_price` is that instrument's close one rebalance later. This is **price
-return only** — no funding-rate carry on the perpetual leg (a future feature).
+is the last completed bar close before the entry rebalance and `exit_price` is
+that instrument's close one rebalance later. This is **price return only** —
+no funding-rate carry on the perpetual leg (a future feature).
 
-`portfolio.gross_return` is an **account-level** monthly return: the month's
-summed leg PnL — each leg's close-to-close return times its USDT notional —
-divided by the month's *opening* equity. `portfolio.net_return` is
-`gross_return - fee_paid_usdt / equity_start_of_month`. Because the divisor is
+`portfolio.gross_return` is an **account-level** per-rebalance-period return:
+the period's summed leg PnL — each leg's close-to-close return times its USDT
+notional — divided by the period's *opening* equity. `portfolio.net_return` is
+`gross_return - fee_paid_usdt / equity_start_of_period`. Because the divisor is
 equity (not deployed notional), compounding the `net_return` series tracks the
-`equity_end_of_month_usdt` curve rather than running ~3× ahead of it.
+`equity_end_of_period_usdt` curve rather than running ~3× ahead of it.
 
-It still won't tie out *exactly* against `equity_end_of_month_usdt` deltas — the
-leg returns are close-to-close bar math while the equity series comes from
+It still won't tie out *exactly* against `equity_end_of_period_usdt` deltas —
+the leg returns are close-to-close bar math while the equity series comes from
 Nautilus' simulated-margin account model (fill prices, mark timing, and funding
 all differ) — but the two are now the same order of magnitude. Treat
 `net_return` as the strategy signal and the equity column as the accounting
 cross-check.
+
+`period` / `period_end_date` are cadence-agnostic: a monthly strategy's period
+label looks like `2026-03` (end date the month's last day), a weekly one's
+looks like `2026-W12` (end date that ISO week's Sunday) — both are just
+implementations of the same `RebalancePeriod` trait
+(`src/period.rs`) driving `RunCapture` (`src/capture.rs`).
 
 ## Tests
 

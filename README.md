@@ -94,8 +94,8 @@ Everything for a run lives under a per-UUID directory:
 | --- | --- |
 | `logs/<UUID>/logs.log`          | the full run log (`lnav logs/<UUID>/logs.log` to browse) |
 | `runs/<UUID>/config.csv`        | the resolved run configuration (`key,value`) — the strategy name, its knobs, the shared flags, the universe file, and the command line |
-| `runs/<UUID>/legs.csv`          | one row per (entry month, instrument) leg, with per-leg return |
-| `runs/<UUID>/portfolio.csv`     | one row per rebalance month — the aggregate return series |
+| `runs/<UUID>/legs.csv`          | one row per (entry period, instrument) leg, with per-leg return |
+| `runs/<UUID>/portfolio.csv`     | one row per rebalance period — the aggregate return series |
 | `runs/<UUID>/fills.csv`         | one row per `OrderFilled` event (fill price, quantity, fee) |
 | `runs/<UUID>/tearsheet.html`    | the QuantStats tearsheet (self-contained; open in any browser) |
 | `runs/<UUID>/legs.html`         | the per-leg diagnostics report (self-contained; open in any browser) |
