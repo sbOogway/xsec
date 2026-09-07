@@ -11,6 +11,7 @@
 
 pub mod momentum;
 pub mod runtime;
+pub mod top5_momentum;
 
 use clap::Subcommand;
 
