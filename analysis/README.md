@@ -1,13 +1,17 @@
-# analysis/ — tearsheet & per-leg CLIs
+# analysis/ — tearsheet, per-leg & parameter-search CLIs
 
-Two report generators over a backtest run's CSV artifacts. Pure Python, driven
-by [`uv`](https://docs.astral.sh/uv/); the Rust backtest and these scripts share
-nothing but the `runs/` directory.
+Report generators and a parameter search over a backtest run's CSV artifacts.
+Pure Python, driven by [`uv`](https://docs.astral.sh/uv/); the Rust backtest
+and these scripts share nothing but the `runs/` directory (`optimize.py` also
+drives the Rust binary directly — see below).
 
 - `tearsheet.py` — a [QuantStats](https://github.com/ranaroussi/quantstats)
   HTML tearsheet from the portfolio return series.
 - `legs.py` — per-leg diagnostics (attribution, long/short book, return
   distribution, monthly breakdown) from `legs.csv`.
+- `optimize.py` — an [Optuna](https://optuna.org/) search over the momentum
+  strategy's flags, with an in-sample / out-of-sample split so the search
+  can't just overfit the whole backtest window.
 
 ## Setup
 
@@ -49,6 +53,59 @@ charts as base64 PNG, no external references). Four sections:
   the long−short spread each month.
 
 A leg "wins" when `per_leg_return > 0` (a flat leg is not a win).
+
+## Parameter search (`optimize.py`)
+
+```sh
+uv run --project analysis analysis/optimize.py                                # 50 trials, defaults
+uv run --project analysis analysis/optimize.py --n-trials 200 --study-name my-study
+uv run --project analysis analysis/optimize.py --skip-build                   # reuse target/release/xsec
+```
+
+Builds `target/release/xsec` once (skip with `--skip-build` if it's already
+current), then splits `--date-start`/`--date-end` chronologically
+(`--split-ratio`, default `0.7`) into an in-sample slice and a trailing
+out-of-sample slice, aligned to month boundaries so the cut never falls inside
+a rebalance month. Each of `--n-trials` trials draws a `momentum` param set
+from an Optuna TPE sampler and runs a real `xsec momentum` backtest over the
+**in-sample** slice only:
+
+| param | range |
+| --- | --- |
+| `lookback_months` | int 1–12 |
+| `percentile` | float 0.05–0.5 |
+| `long_w` | float 0.0–1.0 |
+| `signal_tilt` | float 0.0–3.0 |
+| `risk_pct` | float 0.1–1.5 |
+
+(`holding_months` stays fixed at the CLI default, `1` — the strategy doesn't
+support other values.) The objective is CAGR computed from the trial's
+`portfolio.csv` `net_return` series. A trial whose param combination makes
+`xsec` exit non-zero is pruned, not fatal to the study.
+
+Every trial's `runs/<uuid>/` is a normal backtest run — nothing is deleted —
+so `tearsheet.py --uuid <trial-uuid>` / `legs.py --uuid <trial-uuid>` work on
+any trial afterward. Trial uuids are `<study-name>-trial<NNNN>`.
+
+After the study, the best in-sample trial's params are re-run once against
+the **out-of-sample** slice — data the search never touched — and both CAGRs
+are printed side by side; a big gap flags overfitting more directly than the
+in-sample number alone. That run's uuid is `<study-name>-oos-best`.
+
+The study is persisted to `runs/optuna/<study-name>.db` (sqlite; re-run with
+the same `--study-name` to add more trials to it), and a small summary —
+window dates, best params, both CAGRs, both run uuids — is written to
+`runs/optuna/<study-name>.json`.
+
+**Caveat:** the strategy needs `lookback_months` monthly bars to accumulate
+before it trades at all (the warm-up request in `start_universe`,
+`src/strategy/common.rs`). If the out-of-sample slice is shorter than the
+search space's longest `lookback_months` (12), a trial that picked a long
+lookback can show a flat 0% out-of-sample — it never got a chance to trade —
+which is a too-short window, not evidence of overfitting. `optimize.py` warns
+on stderr when this is possible; the default window (2020 → today) leaves
+plenty of margin, but a short `--date-start`/`--date-end` for a quick smoke
+test can trip it.
 
 ## Inputs
 

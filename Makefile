@@ -12,6 +12,9 @@
 #
 # See `cargo run --bin xsec -- --help` for the strategy list and
 # `cargo run --bin xsec -- $(STRATEGY) --help` for its knobs.
+#
+#   make optimize                                  # Optuna search, 50 trials, defaults
+#   make optimize OPT_ARGS="--n-trials 200"         # see analysis/optimize.py --help
 
 SHELL := bash
 .SHELLFLAGS := -o pipefail -c
@@ -25,7 +28,7 @@ UUID := $(UUID)
 # (--uuid, --universe, --date-*, --starting-balance).
 STRATEGY ?= momentum
 
-.PHONY: tearsheet backtest report
+.PHONY: tearsheet backtest report optimize
 
 ## Run the backtest and build the tearsheet for $(UUID).
 tearsheet: backtest report
@@ -40,3 +43,8 @@ backtest:
 report:
 	uv run --project analysis analysis/tearsheet.py --uuid "$(UUID)"
 	uv run --project analysis analysis/legs.py --uuid "$(UUID)"
+
+## Run an Optuna search over momentum's flags (in-sample), then validate the
+## best trial out-of-sample. Extra flags: make optimize OPT_ARGS="--n-trials 200"
+optimize:
+	uv run --project analysis analysis/optimize.py $(OPT_ARGS)
