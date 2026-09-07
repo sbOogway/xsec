@@ -16,7 +16,11 @@
 //! `legs.csv`/`portfolio.csv` rows off two independent definitions of "what
 //! period is this."
 
-use std::{collections::HashMap, fmt::Debug, time::Duration};
+use std::{
+    collections::{HashMap, HashSet},
+    fmt::Debug,
+    time::Duration,
+};
 
 use anyhow::{Result, anyhow};
 use nautilus_common::actor::DataActorNative;
@@ -210,6 +214,22 @@ pub trait StrategyRuntime:
         }
     }
 
+    /// Close every open position whose instrument is in `instruments` — for a
+    /// carried-book strategy that turns over only the names that dropped out of
+    /// its target set, leaving the rest to ride.
+    fn close_positions(&mut self, instruments: &[InstrumentId]) {
+        if instruments.is_empty() {
+            return;
+        }
+        let wanted: HashSet<InstrumentId> = instruments.iter().copied().collect();
+        let open = self.cache().positions_open(None, None, None, None, None);
+        for position in open {
+            if wanted.contains(&position.instrument_id) {
+                let _ = self.close_position(&position, None, None, None, None, None, None);
+            }
+        }
+    }
+
     /// Total USDT equity (cash + position mark-to-market) reported by the
     /// venue account, or zero if the account is not yet known.
     fn usdt_equity(&self) -> Decimal {
@@ -286,13 +306,24 @@ pub trait StrategyRuntime:
         }
     }
 
-    /// Finalise capture at `on_stop`: price out every leg still open against the
-    /// latest close and flush.
+    /// Finalise capture at `on_stop` for the full-turnover flow: price out every
+    /// leg still open against the latest close and flush.
     fn finish_capture(&mut self) {
         let equity = self.usdt_equity();
         let latest_close = self.runtime().latest_closes();
         if let Some(capture) = self.runtime_mut().capture.as_mut() {
             capture.finish(&latest_close, equity);
+        }
+    }
+
+    /// Finalise capture at `on_stop` for the carried-book flow: mark the open
+    /// book to the latest close, write its last portfolio row and a `legs.csv`
+    /// row per still-open leg, and flush.
+    fn finish_book_capture(&mut self) {
+        let equity = self.usdt_equity();
+        let marks = self.runtime().latest_closes();
+        if let Some(capture) = self.runtime_mut().capture.as_mut() {
+            capture.finish_book(&marks, equity);
         }
     }
 }

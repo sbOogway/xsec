@@ -1,12 +1,14 @@
 //! The top-5 momentum strategy: rank the universe by a composite fast/medium/
-//! slow momentum score, go long the top names, hold for
-//! `--number-holding-periods` of the `--holding-period` clock unit, then turn
-//! the book over — flattening to cash whenever BTC's trend regime filter is
-//! negative. Everything that is not the signal — the rebalance clock, the price
-//! buffers, artifact capture, notional-sized orders — comes from
+//! slow momentum score and hold the top names. Every
+//! `--number-holding-periods` of the `--holding-period` clock unit it re-ranks
+//! and trades only the delta — closing names that fell out of the top `top_n`,
+//! opening the ones that just entered, leaving the rest to ride — and it
+//! flattens to cash whenever BTC's trend regime filter is negative. Everything
+//! that is not the signal — the rebalance clock, the price buffers, artifact
+//! capture, notional-sized orders — comes from
 //! [`crate::strategy::common::StrategyRuntime`].
 
-use std::fmt::Debug;
+use std::{collections::HashSet, fmt::Debug};
 
 use nautilus_common::{actor::DataActor, timer::TimeEvent};
 use nautilus_model::{
@@ -51,6 +53,13 @@ pub struct Top5MomentumFiltered {
     /// filter.
     #[builder(skip)]
     btc_instrument: Option<InstrumentId>,
+
+    /// The names the strategy currently intends to hold — its own book of
+    /// record, kept in lock-step with `RunCapture`'s. It drives the
+    /// close/open diff at each turnover, rather than `cache().positions_open()`
+    /// (whose fills can lag a turnover and drop a name from the diff).
+    #[builder(skip)]
+    book: HashSet<InstrumentId>,
 }
 
 nautilus_strategy!(Top5MomentumFiltered, {
@@ -83,6 +92,7 @@ impl Debug for Top5MomentumFiltered {
             .field("config", &self.config)
             .field("core", &self.core)
             .field("instruments", &self.runtime.instruments)
+            .field("book", &self.book)
             .finish()
     }
 }
@@ -114,7 +124,7 @@ impl DataActor for Top5MomentumFiltered {
     }
 
     fn on_stop(&mut self) -> anyhow::Result<()> {
-        self.finish_capture();
+        self.finish_book_capture();
         anyhow::Ok(())
     }
 
@@ -136,20 +146,18 @@ impl DataActor for Top5MomentumFiltered {
         // The regime filter runs every period, whatever the rebalance cadence:
         // the book flattens to cash the moment BTC's trend turns negative.
         if !regime_is_positive {
+            let closed: Vec<InstrumentId> = self.book.drain().collect();
             self.close_all();
-            let latest_close = self.runtime().latest_closes();
+            let marks = self.runtime().latest_closes();
             if let Some(capture) = self.runtime_mut().capture.as_mut() {
-                capture.record_rebalance(period, equity, Vec::new());
-                capture.finalise_completed(period, &latest_close, equity);
+                capture.record_book_turnover(period, equity, &marks, &[], &closed);
             }
             self.mark_rebalanced(period);
             return anyhow::Ok(());
         }
 
         // Re-rank and turn the book over only once per `number_holding_periods`
-        // clock units. Between turnovers the book rides — a name is held until
-        // the next turnover regardless of where it ranks (holding only the
-        // still-top-`top_n` names is a follow-up).
+        // clock units. Between turnovers the book rides untouched.
         if let Some(last) = self.runtime().last_period {
             let mut due = last;
             for _ in 0..self.config.number_holding_periods {
@@ -159,10 +167,6 @@ impl DataActor for Top5MomentumFiltered {
                 return anyhow::Ok(());
             }
         }
-
-        // Full turnover: flatten the book, then rebuild it from this period's
-        // top `top_n`.
-        self.close_all();
 
         // --- signal: composite fast/medium/slow momentum score, per name ---
         let instruments = self.runtime().instruments.clone();
@@ -182,12 +186,22 @@ impl DataActor for Top5MomentumFiltered {
             }
         }
 
-        // --- rank and take the top `top_n`, unconditionally ---
+        // --- rank and take the top `top_n` ---
         scores.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
         scores.truncate(self.config.top_n);
 
         log::info!("rebalance scores {scores:#?}");
 
+        // Trade only the delta against the book of record: close the names that
+        // fell out of the top `top_n`, open the ones that just entered, leave
+        // the rest to ride.
+        let target: HashSet<InstrumentId> = scores.iter().map(|(id, _)| *id).collect();
+        let dropped: Vec<InstrumentId> = self.book.difference(&target).copied().collect();
+        self.close_positions(&dropped);
+
+        // Size a fresh full book off current equity, but submit orders only for
+        // the names that just joined — a survivor keeps the size it was opened
+        // at.
         let budget = self.config.risk_fraction * equity.to_f64().unwrap_or(0.0);
         let allocation = sizing::allocate(
             budget,
@@ -196,29 +210,40 @@ impl DataActor for Top5MomentumFiltered {
             Conviction::High,
         );
 
-        let mut legs: Vec<(InstrumentId, OrderSide, Decimal, f64)> = Vec::new();
+        let mut opened: Vec<(InstrumentId, OrderSide, Decimal, f64)> = Vec::new();
         for (instrument, notional) in allocation {
+            if self.book.contains(&instrument) {
+                continue; // survivor — rides untouched
+            }
             if !self.submit_notional_market(instrument, OrderSide::Buy, notional) {
                 continue;
             }
-            // Entry mark: the close of the last daily bar before this
-            // rebalance. Paired with the same instrument's close one
-            // rebalance later, this is a clean close-to-close holding-period
-            // return.
+            // Entry mark: the close of the last daily bar before this turnover.
+            // Marked forward at each subsequent turnover, the per-period moves
+            // telescope to a clean close-to-close hold return when the leg
+            // finally closes.
             if let Some(entry_price) = self
                 .runtime()
                 .prices
                 .get(&instrument)
                 .and_then(|q| q.inner.back().copied())
             {
-                legs.push((instrument, OrderSide::Buy, entry_price, notional));
+                opened.push((instrument, OrderSide::Buy, entry_price, notional));
             }
         }
 
-        let latest_close = self.runtime().latest_closes();
+        // Keep the book of record — and `RunCapture`'s — in lock-step with what
+        // was actually traded.
+        for instrument in &dropped {
+            self.book.remove(instrument);
+        }
+        for (instrument, ..) in &opened {
+            self.book.insert(*instrument);
+        }
+
+        let marks = self.runtime().latest_closes();
         if let Some(capture) = self.runtime_mut().capture.as_mut() {
-            capture.record_rebalance(period, equity, legs);
-            capture.finalise_completed(period, &latest_close, equity);
+            capture.record_book_turnover(period, equity, &marks, &opened, &dropped);
         }
 
         self.mark_rebalanced(period);
