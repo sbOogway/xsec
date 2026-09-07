@@ -69,6 +69,15 @@ impl Debug for Top5MomentumFiltered {
 
 impl DataActor for Top5MomentumFiltered {
     fn on_start(&mut self) -> anyhow::Result<()> {
+        let instruments = config::instrument_ids(&self.run.bases);
+        let window = self
+            .config
+            .fast_days
+            .max(self.config.medium_days)
+            .max(self.config.slow_days)
+            .max(self.config.regime_lookback_days) as usize
+            + 1;
+        self.start_universe(instruments, window)?;
         anyhow::Ok(())
     }
 
