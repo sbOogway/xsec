@@ -45,6 +45,11 @@ pub struct Top5MomentumFiltered {
     /// price buffers, capture handle. Filled in `on_start`.
     #[builder(skip)]
     runtime: RuntimeState<IsoWeek>,
+
+    /// `BTC`'s instrument id, resolved once in `on_start` for the regime
+    /// filter.
+    #[builder(skip)]
+    btc_instrument: Option<InstrumentId>,
 }
 
 nautilus_strategy!(Top5MomentumFiltered, {
@@ -84,6 +89,8 @@ impl DataActor for Top5MomentumFiltered {
         let rows = config::config_rows(&self.config);
         self.open_capture(&run, &rows)?;
 
+        self.btc_instrument = Some(btc_instrument_id(&self.run.bases, config::VENUE));
+
         let instruments = config::instrument_ids(&self.run.bases);
         let window = self
             .config
@@ -114,7 +121,7 @@ impl DataActor for Top5MomentumFiltered {
 
         let equity = self.usdt_equity();
 
-        let btc = btc_instrument_id(&self.run.bases, config::VENUE);
+        let btc = self.btc_instrument.expect("set in on_start");
         let btc_return = self
             .runtime()
             .prices
