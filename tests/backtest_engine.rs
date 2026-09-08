@@ -18,10 +18,7 @@ use nautilus_model::{
 
 use xsec::{
     config::RunConfig,
-    data::exchange::{
-        CachedMarketData, InMemoryMarketData, MarketData,
-        bybit::{self, get_bar_type},
-    },
+    data::exchange::{CachedMarketData, InMemoryMarketData, MarketData, bybit::get_bar_type, cache},
     engine,
     strategy::momentum::{Momentum, config as momentum},
 };
@@ -146,8 +143,8 @@ fn cached_market_data_round_trips_a_fetched_universe() {
     let dir = tempfile::tempdir().unwrap();
     let id = InstrumentId::from("BTCUSDT-LINEAR.BYBIT");
 
-    bybit::write_instruments_snapshot(dir.path(), &[perp("BTC")]).unwrap();
-    bybit::write_bar_cache(dir.path(), &id, &daily_bars(id, 30)).unwrap();
+    cache::write_instruments(dir.path(), &[perp("BTC")]).unwrap();
+    cache::write_bars(dir.path(), &id, &daily_bars(id, 30)).unwrap();
 
     let market = CachedMarketData::open(dir.path()).expect("cache dir opens");
 
@@ -163,7 +160,7 @@ fn cached_market_data_round_trips_a_fetched_universe() {
 #[test]
 fn cached_market_data_errors_on_an_uncached_symbol() {
     let dir = tempfile::tempdir().unwrap();
-    bybit::write_instruments_snapshot(dir.path(), &[perp("BTC")]).unwrap();
+    cache::write_instruments(dir.path(), &[perp("BTC")]).unwrap();
 
     let market = CachedMarketData::open(dir.path()).unwrap();
     let err = market

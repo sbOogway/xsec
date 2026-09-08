@@ -1,19 +1,22 @@
-//! Exchange data adapters.
+//! Exchange data adapters and the `data/` cache they share.
 //!
 //! [`MarketData`] is the seam the backtest bootstrap ([`crate::engine`]) pulls
 //! its instruments and bar history through:
 //!
 //! * [`CachedMarketData`] — the offline `data/` cache, and the only adapter the
-//!   backtest reads through. Populated by `xsec fetch`.
-//! * [`bybit::BybitMarketData`] — Bybit HTTP + the cache. Driven by `xsec fetch`;
-//!   never on the backtest path.
+//!   backtest reads through. Lives in [`cache`] with the file layout it reads.
 //! * [`InMemoryMarketData`] — a fixture-backed fake for tests that drive the
 //!   bootstrap without a network or disk.
+//!
+//! The other modules fill that cache: [`bybit`] is the Bybit HTTP surface,
+//! [`cache`] owns the on-disk file layout, and [`fetch`] (`xsec fetch`)
+//! orchestrates the two. Only [`fetch`] touches the network.
 
 pub mod bybit;
-pub mod cached;
+pub mod cache;
+pub mod fetch;
 
-pub use cached::CachedMarketData;
+pub use cache::CachedMarketData;
 
 use std::collections::HashMap;
 

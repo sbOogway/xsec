@@ -7,8 +7,9 @@ use nautilus_model::identifiers::InstrumentId;
 
 use xsec::{
     config::{self, RunConfig, SharedArgs},
-    data::{
-        exchange::{CachedMarketData, bybit::DATA_DIR},
+    data::exchange::{
+        CachedMarketData,
+        cache::DATA_DIR,
         fetch::{self, FetchArgs},
     },
     engine,

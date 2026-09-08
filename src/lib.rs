@@ -9,11 +9,12 @@
 //!   [`sizing`](strategy::common::sizing) helpers and the rolling price
 //!   [`buffer`](strategy::common::buffer).
 //! * [`data`] — the market-data seam ([`data::exchange::MarketData`]): the
-//!   offline `data/` cache the backtest reads ([`data::exchange::CachedMarketData`]),
-//!   the Bybit HTTP fetcher ([`data::exchange::bybit`]) and the `xsec fetch`
-//!   driver ([`data::fetch`]) that fills the cache, plus the
-//!   [`universe`](data::universe) file reader and run-artifact
-//!   [`capture`](data::backtest).
+//!   offline `data/` cache the backtest reads
+//!   ([`data::exchange::CachedMarketData`]), the cache layout
+//!   ([`data::exchange::cache`]), the Bybit HTTP surface
+//!   ([`data::exchange::bybit`]) and `xsec fetch` ([`data::exchange::fetch`])
+//!   that fills the cache, plus the [`universe`](data::universe) file reader and
+//!   run-artifact [`capture`](data::backtest).
 //! * [`engine`] — the backtest bootstrap: `RunConfig` + `MarketData` + strategy
 //!   into a wired [`BacktestEngine`](engine::build_backtest_engine), then run.
 //! * [`config`] and [`period`] — the shared run flags / resolved config and the

@@ -1,28 +1,21 @@
-//! `xsec fetch`: populate the `data/` cache the backtest reads through.
+//! `xsec fetch`: fill the `data/` cache from Bybit.
 //!
-//! Downloads the Bybit linear-instruments list plus every `--universe` symbol's
-//! full daily-bar history, and writes `data/manifest.json` recording — per
-//! requested base — whether it resolved to a Bybit linear perp and its bar
-//! coverage. That manifest is the tradeability oracle the CoinMarketCap
-//! universe work (#32) reads: "is this coin on Bybit, and does it have a candle
-//! at week T". The only part of the binary that touches the network.
+//! Orchestration only — the network lives in [`super::bybit`], the on-disk
+//! layout in [`super::cache`]. Downloads the linear-instruments list plus every
+//! `--universe` symbol's full daily-bar history, and writes `manifest.json`
+//! recording, per requested base, whether it resolved to a Bybit linear perp
+//! and its bar coverage. That manifest is the tradeability oracle the
+//! CoinMarketCap universe work (#32) reads. The only part of the binary that
+//! touches the network.
 
 use std::{collections::HashSet, path::Path};
 
 use anyhow::{Context, Result};
-use chrono::{DateTime, SecondsFormat, Utc};
 use clap::Args;
-use nautilus_model::{enums::BarAggregation, identifiers::InstrumentId, instruments::Instrument};
-use serde::Serialize;
+use nautilus_model::{identifiers::InstrumentId, instruments::Instrument};
 
 use crate::data::{
-    exchange::{
-        MarketData,
-        bybit::{
-            BybitMarketData, bar_cache_is_fresh, bar_cache_path, linear_perp_id,
-            write_instruments_snapshot,
-        },
-    },
+    exchange::{bybit, cache, cache::ManifestEntry},
     universe::read_universe,
 };
 
@@ -66,51 +59,30 @@ impl FetchReport {
     }
 }
 
-#[derive(Serialize)]
-struct SymbolEntry {
-    base: String,
-    instrument_id: Option<String>,
-    status: &'static str,
-    bars: usize,
-    first_bar: Option<String>,
-    last_bar: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    error: Option<String>,
-}
-
-#[derive(Serialize)]
-struct Manifest {
-    generated_at: String,
-    universe: String,
-    instruments: usize,
-    symbols: Vec<SymbolEntry>,
-}
-
 /// Fetch instruments + bar history for the universe at `universe_path` into
-/// `data_dir`. A network failure for a single symbol is recorded and skipped,
-/// not fatal; a failure fetching the instruments list is.
+/// `data_dir`. A network failure for a single symbol is recorded and skipped;
+/// a failure fetching the instruments list aborts.
 pub fn run(universe_path: &Path, data_dir: &Path, args: &FetchArgs) -> Result<FetchReport> {
     let bases = read_universe(universe_path)?;
-    std::fs::create_dir_all(data_dir).ok();
+    let rt = tokio::runtime::Runtime::new().context("tokio runtime for xsec fetch")?;
 
-    let market = BybitMarketData::new()?;
-    let instruments = market
-        .instruments()
+    let instruments = rt
+        .block_on(bybit::fetch_linear_instruments())
         .context("fetch Bybit linear instruments")?;
-    write_instruments_snapshot(data_dir, &instruments)?;
+    cache::write_instruments(data_dir, &instruments)?;
     log::info!("cached {} Bybit linear instruments", instruments.len());
     let listed: HashSet<InstrumentId> = instruments.iter().map(|i| i.id()).collect();
 
     let mut report = FetchReport::default();
-    let mut symbols = Vec::with_capacity(bases.len());
+    let mut entries = Vec::with_capacity(bases.len());
 
     for base in &bases {
-        let id = linear_perp_id(base);
+        let id = bybit::linear_perp_id(base);
 
         if !listed.contains(&id) {
             log::warn!("{base}: no Bybit linear perp ({id}) — skipping");
             report.unlisted.push(base.clone());
-            symbols.push(SymbolEntry {
+            entries.push(ManifestEntry {
                 base: base.clone(),
                 instrument_id: None,
                 status: "unlisted",
@@ -122,32 +94,36 @@ pub fn run(universe_path: &Path, data_dir: &Path, args: &FetchArgs) -> Result<Fe
             continue;
         }
 
-        let hit_network = args.refresh || !bar_cache_is_fresh(data_dir, &id);
-        if args.refresh {
-            std::fs::remove_file(bar_cache_path(data_dir, &id)).ok();
-        }
+        let networked = args.refresh || !cache::bars_are_fresh(data_dir, &id);
+        let outcome = if networked {
+            rt.block_on(bybit::fetch_bars(id))
+                .and_then(|bars| cache::write_bars(data_dir, &id, &bars).map(|()| bars))
+        } else {
+            cache::read_bars(data_dir, &id).map(Option::unwrap_or_default)
+        };
 
-        match market.bars(id, BarAggregation::Day) {
+        match outcome {
             Ok(bars) => {
-                if hit_network {
+                if networked {
                     report.fetched.push(base.clone());
                 } else {
                     report.cached.push(base.clone());
                 }
-                symbols.push(SymbolEntry {
+                let (first_bar, last_bar) = ManifestEntry::bar_dates(&bars);
+                entries.push(ManifestEntry {
                     base: base.clone(),
                     instrument_id: Some(id.to_string()),
-                    status: if hit_network { "fetched" } else { "cached" },
+                    status: if networked { "fetched" } else { "cached" },
                     bars: bars.len(),
-                    first_bar: bars.first().and_then(|b| bar_date(b.ts_event.as_u64())),
-                    last_bar: bars.last().and_then(|b| bar_date(b.ts_event.as_u64())),
+                    first_bar,
+                    last_bar,
                     error: None,
                 });
             }
             Err(e) => {
                 log::error!("{base}: fetch failed: {e:#}");
                 report.failed.push((base.clone(), format!("{e:#}")));
-                symbols.push(SymbolEntry {
+                entries.push(ManifestEntry {
                     base: base.clone(),
                     instrument_id: Some(id.to_string()),
                     status: "failed",
@@ -160,24 +136,12 @@ pub fn run(universe_path: &Path, data_dir: &Path, args: &FetchArgs) -> Result<Fe
         }
     }
 
-    let manifest = Manifest {
-        generated_at: Utc::now().to_rfc3339_opts(SecondsFormat::Secs, true),
-        universe: universe_path.display().to_string(),
-        instruments: instruments.len(),
-        symbols,
-    };
-    let manifest_path = data_dir.join("manifest.json");
-    std::fs::write(
-        &manifest_path,
-        serde_json::to_vec_pretty(&manifest).context("serialize manifest")?,
-    )
-    .with_context(|| format!("write {}", manifest_path.display()))?;
+    cache::write_manifest(
+        data_dir,
+        &universe_path.display().to_string(),
+        instruments.len(),
+        &entries,
+    )?;
 
     Ok(report)
-}
-
-/// A bar's `ts_event` (UNIX nanoseconds) as a `YYYY-MM-DD` UTC date.
-fn bar_date(ts_nanos: u64) -> Option<String> {
-    DateTime::<Utc>::from_timestamp((ts_nanos / 1_000_000_000) as i64, 0)
-        .map(|dt| dt.format("%Y-%m-%d").to_string())
 }
