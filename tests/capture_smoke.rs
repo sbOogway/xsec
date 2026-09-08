@@ -79,7 +79,7 @@ fn capture_writes_the_contract() {
 
     let cfg = RunConfig {
         run_id: RUN_ID.to_string(),
-        strategy: "cross_sectional_momentum".to_string(),
+        strategy: "momentum".to_string(),
         date_start: "2025-01-01".to_string(),
         date_end: "2025-07-01".to_string(),
         bases: vec!["BTC".to_string(), "ETH".to_string()],
@@ -87,15 +87,15 @@ fn capture_writes_the_contract() {
         universe_path: "universe.txt".to_string(),
         argv: "xsectional-rs --uuid test-0000-run".to_string(),
     };
-    // The rows the momentum strategy contributes (see
+    // A representative slice of the rows the momentum strategy contributes (see
     // `strategy::momentum::config::config_rows`).
     let strategy_rows = [
-        ("lookback_months".to_string(), "3".to_string()),
-        ("holding_months".to_string(), "1".to_string()),
-        ("percentile".to_string(), "0.1".to_string()),
-        ("risk_pct".to_string(), "1".to_string()),
+        ("fast_days".to_string(), "1".to_string()),
+        ("slow_days".to_string(), "7".to_string()),
+        ("top_n".to_string(), "5".to_string()),
+        ("short_n".to_string(), "5".to_string()),
         ("long_w".to_string(), "0.5".to_string()),
-        ("signal_tilt".to_string(), "0".to_string()),
+        ("regime_filter".to_string(), "false".to_string()),
     ];
 
     let mut capture: RunCapture<YearMonth> =
@@ -167,9 +167,10 @@ fn capture_writes_the_contract() {
         .map(|r| (r[0].as_str(), r[1].as_str()))
         .collect();
     assert_eq!(cfg_map["run_id"], RUN_ID);
-    assert_eq!(cfg_map["strategy"], "cross_sectional_momentum");
-    assert_eq!(cfg_map["lookback_months"], "3");
-    assert_eq!(cfg_map["holding_months"], "1");
+    assert_eq!(cfg_map["strategy"], "momentum");
+    assert_eq!(cfg_map["fast_days"], "1");
+    assert_eq!(cfg_map["short_n"], "5");
+    assert_eq!(cfg_map["regime_filter"], "false");
     assert_eq!(cfg_map["bases"], "BTC ETH");
     assert_eq!(cfg_map["universe_path"], "universe.txt");
     assert_eq!(cfg_map["argv"], "xsectional-rs --uuid test-0000-run");
@@ -443,6 +444,104 @@ fn capture_writes_the_contract_for_a_carried_book() {
     let c_leg = leg(&legs.rows, c.to_string().as_str());
     assert_eq!(c_leg[1], "2026-02");
     assert_eq!(c_leg[7], "0.000000");
+}
+
+/// A name that flips side across a turnover — long the top slice one period,
+/// short the bottom slice the next — is passed to `record_book_turnover` in
+/// *both* `closed` and `opened` in the same call. The long segment must get its
+/// own `legs.csv` row (priced out at the turnover mark) and the fresh short
+/// leg must start tracking from that same mark.
+#[test]
+fn capture_writes_the_contract_for_a_side_flip() {
+    let dir = tempdir().unwrap();
+    let x = InstrumentId::from("XXXUSDT-LINEAR.BYBIT");
+    let run_id = "test-0003-flip";
+
+    let cfg = RunConfig {
+        run_id: run_id.to_string(),
+        strategy: "momentum".to_string(),
+        date_start: "2026-01-01".to_string(),
+        date_end: "2026-04-01".to_string(),
+        bases: vec!["XXX".to_string()],
+        starting_balance: "1000 USDT".to_string(),
+        universe_path: "universe.txt".to_string(),
+        argv: "xsec --uuid test-0003-flip".to_string(),
+    };
+
+    let mut capture: RunCapture<YearMonth> = RunCapture::open_in(dir.path(), &cfg, &[]).unwrap();
+    let ym = |month| YearMonth { year: 2026, month };
+    let equity = Decimal::from(1000);
+
+    // Jan: X opens long @ 100, notional 500.
+    capture.record_book_turnover(
+        ym(1),
+        equity,
+        &HashMap::from([(x, Decimal::from(100))]),
+        &[(x, OrderSide::Buy, Decimal::from(100), 500.0)],
+        &[],
+    );
+
+    // Feb: X has run to 120 and flips to the short slice — closed as a long,
+    // reopened as a short at the same 120 mark.
+    capture.record_book_turnover(
+        ym(2),
+        equity,
+        &HashMap::from([(x, Decimal::from(120))]),
+        &[(x, OrderSide::Sell, Decimal::from(120), 500.0)],
+        &[x],
+    );
+
+    // Mar: the short has worked, X down to 108. Close the book.
+    capture.finish_book(&HashMap::from([(x, Decimal::from(108))]), equity);
+    drop(capture);
+
+    let run_dir = dir.path().join(run_id);
+    let legs = read_csv(run_dir.join("legs.csv"));
+    let portfolio = read_csv(run_dir.join("portfolio.csv"));
+
+    // Two leg rows for the one instrument: the long segment, then the short.
+    assert_eq!(legs.rows.len(), 2);
+    let long_leg = legs
+        .rows
+        .iter()
+        .find(|r| r[4] == "long")
+        .expect("a long leg row");
+    assert_eq!(long_leg[1], "2026-01", "long leg keyed to its Jan entry");
+    assert_eq!(
+        (&long_leg[5], &long_leg[6]),
+        (&"100".to_string(), &"120".to_string())
+    );
+    assert_eq!(long_leg[7], "0.200000", "long leg +20% (100 -> 120)");
+
+    let short_leg = legs
+        .rows
+        .iter()
+        .find(|r| r[4] == "short")
+        .expect("a short leg row");
+    assert_eq!(short_leg[1], "2026-02", "short leg keyed to its Feb entry");
+    assert_eq!(
+        (&short_leg[5], &short_leg[6]),
+        (&"120".to_string(), &"108".to_string())
+    );
+    assert_eq!(
+        short_leg[7], "0.100000",
+        "short leg +10% (120 -> 108, signed)"
+    );
+
+    // Jan portfolio row: the long marked 100 -> 120 over 500 notional = +100 on
+    // 1000 equity. Feb: the short marked 120 -> 108 = +50 on 1000.
+    let by_period = |p: &str| {
+        portfolio
+            .rows
+            .iter()
+            .find(|r| r[1] == p)
+            .cloned()
+            .unwrap_or_else(|| panic!("no row for {p}"))
+    };
+    assert_eq!(by_period("2026-01")[5], "0.100000", "gross_return Jan");
+    assert_eq!(by_period("2026-01")[3], "1", "n_long Jan");
+    assert_eq!(by_period("2026-02")[5], "0.050000", "gross_return Feb");
+    assert_eq!(by_period("2026-02")[4], "1", "n_short Feb");
 }
 
 struct Csv {

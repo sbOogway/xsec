@@ -2,17 +2,17 @@
 //! the strategy runtime's rebalance clock ([`crate::strategy::common`]) and
 //! the run-artifact capture layer ([`crate::capture`]).
 //!
-//! A period is whatever a strategy rebalances on — a calendar month
-//! ([`YearMonth`]) for `momentum`, a single calendar day ([`CalendarDay`]) or
-//! an ISO week ([`IsoWeek`]) for `top5-momentum-filtered`. Both the
-//! rebalance-clock guard and the `legs.csv` / `portfolio.csv` join key derive
-//! from the same value via [`RebalancePeriod`], so there is exactly one
-//! definition of "what period is this" per strategy, not two independent ones.
+//! A period is whatever a strategy rebalances on — a single calendar day
+//! ([`CalendarDay`]), an ISO week ([`IsoWeek`]) or a calendar month
+//! ([`YearMonth`]). Both the rebalance-clock guard and the `legs.csv` /
+//! `portfolio.csv` join key derive from the same value via [`RebalancePeriod`],
+//! so there is exactly one definition of "what period is this" per strategy,
+//! not two independent ones.
 //!
-//! A strategy with a fixed cadence uses a concrete type directly (`momentum`
-//! keys on `YearMonth`). One whose cadence is a run-time flag uses
-//! [`CalendarPeriod`], the tagged union of all three, with [`HoldingPeriod`]
-//! selecting which arm a `--holding-period` flag picks.
+//! A strategy with a fixed cadence uses a concrete type directly. One whose
+//! cadence is a run-time flag uses [`CalendarPeriod`], the tagged union of all
+//! three, with [`HoldingPeriod`] selecting which arm a `--holding-period` flag
+//! picks — `momentum` keys on this.
 
 use chrono::{DateTime, Datelike, NaiveDate, Utc, Weekday};
 
@@ -199,8 +199,8 @@ impl HoldingPeriod {
 
 /// A [`RebalancePeriod`] whose cadence is chosen at run time — one of
 /// [`CalendarDay`], [`IsoWeek`] or [`YearMonth`], tagged so `label` /
-/// `end_date` / `next` dispatch to the right one. `top5-momentum-filtered`
-/// keys on this so `--holding-period` can pick the cadence per run.
+/// `end_date` / `next` dispatch to the right one. `momentum` keys on this so
+/// `--holding-period` can pick the cadence per run.
 ///
 /// A single run only ever holds one arm (the one [`HoldingPeriod::period_at`]
 /// produces), so the derived `Ord` — which orders by arm first — only ever

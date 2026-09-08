@@ -23,8 +23,7 @@ use xsec::{
     strategy::{
         StrategyKind,
         common::StrategyRuntime,
-        momentum::{XSectionalMomentum, config as momentum},
-        top5_momentum_filtered::{Top5MomentumFiltered, config as top5_momentum_filtered},
+        momentum::{Momentum, config as momentum},
     },
 };
 
@@ -47,7 +46,7 @@ fn main() -> anyhow::Result<()> {
             // the `runs/<uuid>/` files to the same id.
             println!("run_id={}", run.run_id);
 
-            let strategy = XSectionalMomentum::builder()
+            let strategy = Momentum::builder()
                 .run(run.clone())
                 .config(strategy_config)
                 .build();
@@ -56,24 +55,6 @@ fn main() -> anyhow::Result<()> {
                 &run,
                 momentum::VENUE,
                 momentum::TIMEFRAME,
-                &instrument_ids,
-                strategy,
-            )?;
-        }
-        StrategyKind::Top5MomentumFiltered(args) => {
-            let run = config::build_config(&cli, &argv, cli.strategy.name())?;
-            let strategy_config = top5_momentum_filtered::build(args, &run.bases)?;
-            println!("run_id={}", run.run_id);
-
-            let strategy = Top5MomentumFiltered::builder()
-                .run(run.clone())
-                .config(strategy_config)
-                .build();
-            let instrument_ids = top5_momentum_filtered::instrument_ids(&run.bases);
-            run_engine(
-                &run,
-                top5_momentum_filtered::VENUE,
-                top5_momentum_filtered::TIMEFRAME,
                 &instrument_ids,
                 strategy,
             )?;
@@ -153,7 +134,7 @@ fn run_engine<S: StrategyRuntime>(
             let rt = tokio::runtime::Runtime::new().unwrap();
             rt.block_on(async {
                 let mut node = LiveNode::builder(TraderId::from("TRADER-001"), Environment::Live)?
-                    .with_name("XSectionalMomentum-Live")
+                    .with_name("Momentum-Live")
                     .add_data_client(None, Box::new(factory), cfg)?
                     .build()?;
 

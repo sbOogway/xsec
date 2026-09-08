@@ -18,18 +18,19 @@
 //! `equity_end_of_period_usdt`. They are *not* the mean per-leg return — that
 //! would ignore how much of the account is actually deployed.
 //!
-//! Two capture flows share this file format. **Full turnover**
-//! ([`record_rebalance`](RunCapture::record_rebalance) +
-//! [`finalise_completed`](RunCapture::finalise_completed)): every leg is
-//! entered and exited within one period, and the period's PnL is those legs'
-//! close-to-close move — `momentum` uses this. **Carried book**
-//! ([`record_book_turnover`](RunCapture::record_book_turnover) +
+//! Two capture flows share this file format. **Carried book**
+//! ([`record_book_turnover`](RunCapture::record_book_turnover),
 //! [`finish_book`](RunCapture::finish_book)): a leg can span many turnovers,
 //! each period's PnL is the whole open book marked close-to-close over that
 //! period, a leg's `legs.csv` row is written once (when it finally closes,
 //! spanning its full hold), and a portfolio row's `n_long` / `n_short` is the
-//! book size over the period rather than the count entered —
-//! `top5-momentum-filtered` uses this.
+//! book size over the period rather than the count entered. `momentum` uses
+//! this. **Full turnover** ([`record_rebalance`](RunCapture::record_rebalance),
+//! [`finalise_completed`](RunCapture::finalise_completed)): every leg is
+//! entered and exited within one period, and the period's PnL is those legs'
+//! close-to-close move. No shipped strategy drives the full-turnover flow
+//! today; it is retained (and covered by `tests/capture_smoke.rs`) for a
+//! rebalance-every-period strategy that does not carry a book.
 //!
 //! `RunCapture` is generic over [`crate::period::RebalancePeriod`]: the
 //! `period` / `period_end_date` columns and the finalisation logic below work

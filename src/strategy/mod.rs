@@ -11,29 +11,26 @@
 
 pub mod common;
 pub mod momentum;
-pub mod top5_momentum_filtered;
 
 use clap::Subcommand;
 
 /// Which strategy a run drives. One subcommand per strategy, each carrying that
-/// strategy's flags (`xsec momentum --lookback-months 6`).
+/// strategy's flags (`xsec momentum --top-n 3`).
 #[derive(Subcommand, Debug)]
 pub enum StrategyKind {
-    /// Jegadeesh–Titman cross-sectional momentum: each month go long the top
-    /// decile and short the bottom decile of the universe by trailing return.
+    /// Composite fast/medium/slow momentum on a configurable rebalance cadence
+    /// (`--holding-period`, default daily): long the top `--top-n` names, short
+    /// the bottom `--short-n` (`--short-n 0` = long-only), trading only the
+    /// carried-book delta each re-rank, with an optional BTC regime filter
+    /// (`--regime-filter`) that flattens to cash on a negative trend.
     Momentum(momentum::config::Args),
-    /// Long-only top-5 composite momentum on a configurable rebalance cadence
-    /// (`--holding-period`, default daily), with a BTC regime filter that
-    /// flattens the book to cash on a negative trend.
-    Top5MomentumFiltered(top5_momentum_filtered::config::Args),
 }
 
 impl StrategyKind {
     /// The canonical name recorded as `strategy` in `runs/<uuid>/config.csv`.
     pub fn name(&self) -> &'static str {
         match self {
-            StrategyKind::Momentum(_) => "cross_sectional_momentum",
-            StrategyKind::Top5MomentumFiltered(_) => "top5_momentum_filtered",
+            StrategyKind::Momentum(_) => "momentum",
         }
     }
 }

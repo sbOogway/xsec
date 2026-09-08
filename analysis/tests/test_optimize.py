@@ -39,12 +39,27 @@ def runs_dir(tmp_path, monkeypatch):
     return runs
 
 
-def write_run(runs: Path, uuid: str, *, monthly_returns: list[float]) -> None:
+def portfolio_frame(returns: list[float], *, gap_days: int = 30) -> pd.DataFrame:
+    """A minimal `portfolio.csv` frame: `returns` spaced `gap_days` apart."""
+    start = pd.Timestamp("2025-01-31")
+    dates = [start + pd.Timedelta(days=gap_days * i) for i in range(len(returns))]
+    return pd.DataFrame(
+        {
+            "period": [f"P{i:03d}" for i in range(len(returns))],
+            "period_end_date": [d.strftime("%Y-%m-%d") for d in dates],
+            "net_return": returns,
+        }
+    )
+
+
+def write_run(runs: Path, uuid: str, *, returns: list[float], gap_days: int = 30) -> None:
     run_dir = runs / uuid
     run_dir.mkdir(parents=True, exist_ok=True)
+    frame = portfolio_frame(returns, gap_days=gap_days)
     rows = "".join(
-        f"{uuid},2025-{m:02d},2025-{m:02d}-28,5,5,{r:.6f},1.0,{r:.6f},{1000 * (1 + r):.2f},10,runs/{uuid}/fills.csv\n"
-        for m, r in enumerate(monthly_returns, start=1)
+        f"{uuid},{row.period},{row.period_end_date},5,5,{row.net_return:.6f},1.0,"
+        f"{row.net_return:.6f},{1000 * (1 + row.net_return):.2f},10,runs/{uuid}/fills.csv\n"
+        for row in frame.itertuples()
     )
     (run_dir / "portfolio.csv").write_text(PORTFOLIO_HEADER + rows)
 
@@ -88,69 +103,85 @@ def test_split_bad_ratio_raises():
         optimize.split_is_oos("2020-01-01", "2020-12-31", ratio=1.5)
 
 
-def test_month_span():
-    assert optimize.month_span("2020-01-01", "2020-12-31") == 12
-    assert optimize.month_span("2020-01-15", "2020-02-01") == 2
+def test_day_span():
+    assert optimize.day_span("2020-01-01", "2020-01-01") == 1
+    assert optimize.day_span("2020-01-01", "2020-12-31") == 366  # 2020 is a leap year
 
 
 # -- cagr -----------------------------------------------------------------
 
 
-def test_cagr_basic_growth():
-    returns = pd.Series([0.1, 0.1])
-    assert optimize.cagr(returns) == pytest.approx((1.1 * 1.1) ** (12 / 2) - 1)
+def test_cagr_annualizes_by_calendar_span():
+    # three daily periods, +1% each: growth 1.030301 over 3/365.25 years.
+    frame = portfolio_frame([0.01, 0.01, 0.01], gap_days=1)
+    years = 3 * 1 / 365.25
+    assert optimize.cagr(frame) == pytest.approx((1.01**3) ** (1.0 / years) - 1.0)
 
 
-def test_cagr_single_month_annualizes_directly():
-    returns = pd.Series([0.05])
-    assert optimize.cagr(returns) == pytest.approx(1.05**12 - 1)
+def test_cagr_monthly_cadence_matches_month_count():
+    # 12 periods spaced 30 days: ~360/365.25 years, i.e. roughly one year.
+    frame = portfolio_frame([0.02] * 12, gap_days=30)
+    years = 12 * 30 / 365.25
+    assert optimize.cagr(frame) == pytest.approx((1.02**12) ** (1.0 / years) - 1.0)
 
 
 def test_cagr_wipeout_floors_at_minus_one():
-    returns = pd.Series([-1.0, 0.5])
-    assert optimize.cagr(returns) == -1.0
+    frame = portfolio_frame([-1.0, 0.5], gap_days=30)
+    assert optimize.cagr(frame) == -1.0
 
 
 def test_cagr_empty_raises():
     with pytest.raises(ValueError):
-        optimize.cagr(pd.Series([], dtype=float))
+        optimize.cagr(portfolio_frame([]))
 
 
 # -- params_to_argv ---------------------------------------------------------
 
 
 def test_params_to_argv_formats_int_and_float():
-    argv = optimize.params_to_argv({"lookback_months": 6, "percentile": 0.1, "long_w": 0.5})
+    argv = optimize.params_to_argv({"fast_days": 3, "top_n": 5, "long_w": 0.5})
     assert argv == [
-        "--lookback-months",
-        "6",
-        "--percentile",
-        "0.100000",
+        "--fast-days",
+        "3",
+        "--top-n",
+        "5",
         "--long-w",
         "0.500000",
     ]
 
 
-# -- load_net_returns ---------------------------------------------------
+def test_suggest_params_covers_the_search_space():
+    study = optuna.create_study()
+    params = optimize.suggest_params(study.ask())
+    assert set(params) == set(optimize.SEARCH_SPACE)
+    for name, value in params.items():
+        kind, low, high = optimize.SEARCH_SPACE[name]
+        assert low <= value <= high
+        if kind == "int":
+            assert isinstance(value, int)
 
 
-def test_load_net_returns_reads_sorted_series(runs_dir):
-    write_run(runs_dir, "r1", monthly_returns=[0.01, -0.02, 0.03])
-    returns = optimize.load_net_returns("r1")
-    assert list(returns.round(6)) == [0.01, -0.02, 0.03]
+# -- load_portfolio ---------------------------------------------------
 
 
-def test_load_net_returns_missing_run_fails(runs_dir):
+def test_load_portfolio_reads_sorted_frame(runs_dir):
+    write_run(runs_dir, "r1", returns=[0.01, -0.02, 0.03])
+    frame = optimize.load_portfolio("r1")
+    assert list(frame["net_return"].round(6)) == [0.01, -0.02, 0.03]
+    assert list(frame["period"]) == ["P000", "P001", "P002"]
+
+
+def test_load_portfolio_missing_run_fails(runs_dir):
     with pytest.raises(optimize.BacktestFailed):
-        optimize.load_net_returns("nope")
+        optimize.load_portfolio("nope")
 
 
-def test_load_net_returns_header_only_fails(runs_dir):
+def test_load_portfolio_header_only_fails(runs_dir):
     run_dir = runs_dir / "r1"
     run_dir.mkdir()
     (run_dir / "portfolio.csv").write_text(PORTFOLIO_HEADER)
     with pytest.raises(optimize.BacktestFailed):
-        optimize.load_net_returns("r1")
+        optimize.load_portfolio("r1")
 
 
 # -- objective ------------------------------------------------------------
@@ -158,7 +189,7 @@ def test_load_net_returns_header_only_fails(runs_dir):
 
 def test_objective_success_returns_cagr_and_records_attrs(runs_dir, monkeypatch):
     def fake_run_backtest(binary, uuid, **kwargs):
-        write_run(runs_dir, uuid, monthly_returns=[0.02, 0.02, 0.02])
+        write_run(runs_dir, uuid, returns=[0.02, 0.02, 0.02], gap_days=30)
 
     monkeypatch.setattr(optimize, "run_backtest", fake_run_backtest)
 
@@ -174,10 +205,11 @@ def test_objective_success_returns_cagr_and_records_attrs(runs_dir, monkeypatch)
     study.optimize(objective, n_trials=1)
 
     trial = study.trials[0]
+    years = 3 * 30 / 365.25
     assert trial.state == optuna.trial.TrialState.COMPLETE
-    assert trial.value == pytest.approx((1.02**3) ** (12 / 3) - 1)
+    assert trial.value == pytest.approx((1.02**3) ** (1.0 / years) - 1.0)
     assert trial.user_attrs["run_uuid"] == "test-study-trial0000"
-    assert trial.user_attrs["n_months"] == 3
+    assert trial.user_attrs["n_periods"] == 3
 
 
 def test_objective_prunes_on_backtest_failure(runs_dir, monkeypatch):
@@ -209,7 +241,7 @@ def test_main_runs_end_to_end_and_writes_summary(runs_dir, monkeypatch, capsys):
     monkeypatch.setattr(optimize, "ensure_release_binary", lambda *, skip_build: Path("fake-binary"))
 
     def fake_run_backtest(binary, uuid, **kwargs):
-        write_run(runs_dir, uuid, monthly_returns=[0.01, 0.015, 0.02])
+        write_run(runs_dir, uuid, returns=[0.01, 0.015, 0.02], gap_days=30)
 
     monkeypatch.setattr(optimize, "run_backtest", fake_run_backtest)
 
@@ -218,7 +250,7 @@ def test_main_runs_end_to_end_and_writes_summary(runs_dir, monkeypatch, capsys):
             "--date-start",
             "2020-01-01",
             "--date-end",
-            "2020-12-31",
+            "2020-06-30",
             "--n-trials",
             "2",
             "--study-name",
@@ -229,8 +261,8 @@ def test_main_runs_end_to_end_and_writes_summary(runs_dir, monkeypatch, capsys):
     captured = capsys.readouterr()
     assert "best trial" in captured.out
     assert "out-of-sample CAGR" in captured.out
-    # the 2020-01-01..2020-12-31 window's OOS slice is short enough to trip
-    # the too-short-for-max-lookback warning.
+    # the 2020-01-01..2020-06-30 window's OOS slice is short enough to trip
+    # the too-short-for-warm-up warning.
     assert "warning: the out-of-sample window" in captured.err
 
     summary_path = runs_dir / "optuna" / "smoke-study.json"
