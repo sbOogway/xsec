@@ -314,19 +314,9 @@ pub trait StrategyRuntime:
         }
     }
 
-    /// Finalise capture at `on_stop` for the full-turnover flow: price out every
-    /// leg still open against the latest close and flush.
-    fn finish_capture(&mut self) {
-        let equity = self.usdt_equity();
-        let latest_close = self.runtime().latest_closes();
-        if let Some(capture) = self.runtime_mut().capture.as_mut() {
-            capture.finish(&latest_close, equity);
-        }
-    }
-
-    /// Finalise capture at `on_stop` for the carried-book flow: mark the open
-    /// book to the latest close, write its last portfolio row and a `legs.csv`
-    /// row per still-open leg, and flush.
+    /// Finalise capture at `on_stop`: mark the open book to the latest close,
+    /// write its last portfolio row and a `legs.csv` row per still-open leg,
+    /// and flush.
     fn finish_book_capture(&mut self) {
         let equity = self.usdt_equity();
         let marks = self.runtime().latest_closes();

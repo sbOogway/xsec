@@ -133,21 +133,16 @@ the last completed bar close before the leg was opened; `exit_price` is the
 close when it was closed. This is **price return only** — no funding-rate carry
 on the perpetual leg (a future feature).
 
-How long a leg lives — and how its PnL lands in `portfolio.csv` — depends on
-the strategy's capture flow (`src/data/backtest.rs`). `momentum` uses the
-**carried book** flow: a name still in the target set (same side) at a re-rank
-rides on untouched, so a leg can span many periods and gets exactly one
-`legs.csv` row, written when it finally closes and covering the whole hold. A
-period's `gross_return` marks the *entire open book* close-to-close over that
-period (every held leg, not just fresh entries), and `n_long` / `n_short` is
-the book size. The per-period contributions of a multi-period leg sum to its
-`legs.csv` `per_leg_return`. (With `--number-holding-periods > 1` there is one
-row per re-rank, spanning that many periods.)
-
-The alternative **full turnover** flow — every leg opened and closed exactly
-one period apart, a period's PnL being just the legs entered that period — is
-still in `src/data/backtest.rs` (and covered by `tests/capture_smoke.rs`) but no
-shipped strategy drives it today.
+How long a leg lives — and how its PnL lands in `portfolio.csv` — follows the
+**carried book** flow (`src/data/backtest.rs`): a name still in the target set
+(same side) at a re-rank rides on untouched, so a leg can span many periods and
+gets exactly one `legs.csv` row, written when it finally closes and covering the
+whole hold. A period's `gross_return` marks the *entire open book*
+close-to-close over that period (every held leg, not just fresh entries), and
+`n_long` / `n_short` is the book size. The per-period contributions of a
+multi-period leg sum to its `legs.csv` `per_leg_return`. (With
+`--number-holding-periods > 1` there is one row per re-rank, spanning that many
+periods.)
 
 `portfolio.gross_return` is an **account-level** per-rebalance-period return:
 the period's summed leg PnL — each leg's close-to-close move times its USDT
