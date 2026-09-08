@@ -19,7 +19,7 @@ use tempfile::tempdir;
 
 use nautilus_model::{enums::OrderSide, identifiers::InstrumentId};
 use xsec::data::backtest::{RunCapture, RunConfig};
-use xsec::strategy::common::period::{IsoWeek, YearMonth};
+use xsec::period::{IsoWeek, YearMonth};
 
 // The schema downstream tooling depends on — pinned here as literals so a
 // change to the capture headers has to be a deliberate change to this test too.

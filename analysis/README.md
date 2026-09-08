@@ -166,8 +166,8 @@ cross-check.
 `period` / `period_end_date` are cadence-agnostic: a monthly strategy's period
 label looks like `2026-03` (end date the month's last day), a weekly one's
 `2026-W12` (end date that ISO week's Sunday), a daily one's `2026-03-14` — all
-just implementations of the same `RebalancePeriod` trait
-(`src/strategy/common/period.rs`) driving `RunCapture` (`src/data/backtest.rs`).
+just implementations of the same `RebalancePeriod` trait (`src/period.rs`)
+driving `RunCapture` (`src/data/backtest.rs`).
 
 ## Tests
 

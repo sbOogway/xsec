@@ -32,8 +32,8 @@
 //! today; it is retained (and covered by `tests/capture_smoke.rs`) for a
 //! rebalance-every-period strategy that does not carry a book.
 //!
-//! `RunCapture` is generic over [`crate::strategy::common::period::RebalancePeriod`]:
-//! the `period` / `period_end_date` columns and the finalisation logic below work
+//! `RunCapture` is generic over [`crate::period::RebalancePeriod`]: the
+//! `period` / `period_end_date` columns and the finalisation logic below work
 //! the same way whatever cadence a strategy rebalances on — a calendar month,
 //! an ISO week and a run-time-selected `CalendarPeriod` are all just
 //! implementations of that trait.
@@ -50,7 +50,7 @@ use chrono::{NaiveDate, Utc};
 use nautilus_model::{enums::OrderSide, events::OrderFilled, identifiers::InstrumentId};
 use rust_decimal::Decimal;
 
-use crate::strategy::common::period::RebalancePeriod;
+use crate::period::RebalancePeriod;
 
 pub const RUN_DIR: &str = "runs";
 

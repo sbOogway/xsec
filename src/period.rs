@@ -1,6 +1,10 @@
 //! The cadence-agnostic "what rebalance period is this" abstraction shared by
-//! the strategy runtime's rebalance clock ([`super`]) and the run-artifact
-//! capture layer ([`crate::data::backtest`]).
+//! the strategy runtime's rebalance clock ([`crate::strategy::common`]) and the
+//! run-artifact capture layer ([`crate::data::backtest`]).
+//!
+//! It lives at the crate root — like [`crate::config`] — because both of those
+//! subsystems depend on it while it depends on neither: nesting it under either
+//! one would make `data` and `strategy` circularly reference each other.
 //!
 //! A period is whatever a strategy rebalances on — a single calendar day
 //! ([`CalendarDay`]), an ISO week ([`IsoWeek`]) or a calendar month
