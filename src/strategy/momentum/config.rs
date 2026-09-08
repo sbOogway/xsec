@@ -28,7 +28,7 @@ pub const MARKET: Market = Market {
 #[derive(ClapArgs, Debug)]
 pub struct Args {
     /// Fast-momentum lookback, in daily bars.
-    #[arg(long, default_value_t = 1)]
+    #[arg(long, default_value_t = 7)]
     pub fast_days: u32,
 
     /// Medium-momentum lookback, in daily bars.
@@ -36,7 +36,7 @@ pub struct Args {
     pub medium_days: u32,
 
     /// Slow-momentum lookback, in daily bars.
-    #[arg(long, default_value_t = 7)]
+    #[arg(long, default_value_t = 30)]
     pub slow_days: u32,
 
     /// Weight on fast momentum in the composite score.
@@ -68,13 +68,13 @@ pub struct Args {
     pub long_short_balance: f64,
 
     /// BTC trailing-return window for the regime filter, in days.
-    #[arg(long, default_value_t = 20)]
+    #[arg(long, default_value_t = 30)]
     pub regime_lookback_days: u32,
 
     /// Flatten the whole book to cash whenever BTC's trailing return over
     /// `--regime-lookback-days` is negative. Off by default; when on, the
     /// universe must contain `BTC`.
-    #[arg(long, action = clap::ArgAction::Set, default_value_t = false)]
+    #[arg(long, action = clap::ArgAction::Set, default_value_t = true)]
     pub regime_filter: bool,
 
     /// Gross exposure as a fraction of account equity, per rebalance.
@@ -93,7 +93,7 @@ pub struct Args {
 
     /// Number of `--holding-period` units the book is held before it is
     /// re-ranked and its top-`n` / bottom-`n` delta is traded.
-    #[arg(long, default_value_t = 1)]
+    #[arg(long, default_value_t = 7)]
     pub number_holding_periods: u32,
 }
 
