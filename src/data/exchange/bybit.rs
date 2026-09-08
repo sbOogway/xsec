@@ -1,7 +1,9 @@
 //! Bybit data adapter: bar-type construction, the on-disk bar cache, and the
 //! shared HTTP client that fetches linear-perp instruments and monthly bar
-//! history. Used by the backtest bootstrap in `src/main.rs` and by the
-//! rebalance runtime in [`crate::strategy::common`].
+//! history. [`BybitMarketData`] is the production [`MarketData`] the backtest
+//! bootstrap ([`crate::engine`]) pulls through; [`get_bar_type`] and the raw
+//! fetch functions are also used by the rebalance runtime in
+//! [`crate::strategy::common`].
 
 use std::{fs, path::PathBuf};
 
@@ -14,6 +16,8 @@ use nautilus_model::{
     identifiers::InstrumentId,
     instruments::InstrumentAny,
 };
+
+use crate::data::exchange::MarketData;
 
 const DATA_DIR: &str = "data";
 const STALE_AFTER_HOURS: i64 = 24;
@@ -114,4 +118,33 @@ pub fn parse_date(s: &str) -> Result<DateTime<Utc>> {
     DateTime::parse_from_rfc3339(s)
         .map(|d| d.with_timezone(&Utc))
         .with_context(|| format!("parse date {s}"))
+}
+
+/// The production [`MarketData`]: Bybit's HTTP API with the on-disk bar cache.
+/// Owns a Tokio runtime so the backtest bootstrap can stay synchronous —
+/// `instruments` and `bars` block on the async fetch functions above.
+pub struct BybitMarketData {
+    rt: tokio::runtime::Runtime,
+}
+
+impl BybitMarketData {
+    /// Create the adapter and its Tokio runtime.
+    pub fn new() -> Result<Self> {
+        Ok(Self {
+            rt: tokio::runtime::Runtime::new().context("tokio runtime for BybitMarketData")?,
+        })
+    }
+}
+
+impl MarketData for BybitMarketData {
+    fn instruments(&self) -> Result<Vec<InstrumentAny>> {
+        let instruments = self.rt.block_on(fetch_linear_instruments())?;
+        // Prime the shared client so `bars` can resolve symbols.
+        seed_instruments(&instruments);
+        Ok(instruments)
+    }
+
+    fn bars(&self, instrument_id: InstrumentId, aggregation: BarAggregation) -> Result<Vec<Bar>> {
+        self.rt.block_on(fetch_bars_cached(instrument_id, aggregation))
+    }
 }

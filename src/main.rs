@@ -1,25 +1,12 @@
-use std::str::FromStr;
-
 use clap::Parser;
 use nautilus_common::enums::Environment;
-use nautilus_core::UnixNanos;
-use nautilus_model::{
-    data::Data,
-    enums::{AccountType, BarAggregation, BookType, OmsType},
-    identifiers::{InstrumentId, Venue},
-    instruments::Instrument,
-    types::Money,
-};
-
-use nautilus_backtest::{
-    config::{BacktestEngineConfig, SimulatedVenueConfig},
-    engine::BacktestEngine,
-};
 use nautilus_live::node::LiveNode;
+use nautilus_model::identifiers::InstrumentId;
 
 use xsec::{
     config::{self, RunConfig, SharedArgs},
-    data::exchange::bybit as market_data,
+    data::exchange::bybit::BybitMarketData,
+    engine,
     strategy::{
         StrategyKind,
         common::StrategyRuntime,
@@ -69,69 +56,25 @@ fn main() -> anyhow::Result<()> {
                 .config(strategy_config)
                 .build();
             let instrument_ids = momentum::instrument_ids(&run.bases);
-            run_engine(
-                &run,
-                momentum::VENUE,
-                momentum::TIMEFRAME,
-                &instrument_ids,
-                strategy,
-            )?;
+            run_engine(&run, &instrument_ids, strategy)?;
         }
     }
 
     Ok(())
 }
 
-/// Boot the configured [`ENVIRONMENT`] for `strategy`, loading the venue,
-/// instruments and bars it needs. `venue` / `timeframe` / `instrument_ids` are
-/// the strategy's market surface, read from its `config.rs`.
+/// Boot the configured [`ENVIRONMENT`] for `strategy`. The backtest bring-up
+/// lives in [`xsec::engine`]; `Live` / `Sandbox` are bootstrapped inline here
+/// because they need an entirely different setup (a `LiveNode`, real venue
+/// clients).
 fn run_engine<S: StrategyRuntime>(
     run: &RunConfig,
-    venue: &str,
-    timeframe: BarAggregation,
     instrument_ids: &[InstrumentId],
     strategy: S,
 ) -> anyhow::Result<()> {
     match ENVIRONMENT {
         Environment::Backtest => {
-            let starting_balance = Money::from(run.starting_balance.as_str());
-            let start = Some(UnixNanos::from_str(&run.date_start).unwrap());
-            let end = Some(UnixNanos::from_str(&run.date_end).unwrap());
-
-            let mut engine = BacktestEngine::new(BacktestEngineConfig::default()).unwrap();
-            engine
-                .add_venue(
-                    SimulatedVenueConfig::builder()
-                        .venue(Venue::from(venue))
-                        .oms_type(OmsType::Hedging)
-                        .account_type(AccountType::Margin)
-                        .book_type(BookType::L1_MBP)
-                        .starting_balances(vec![starting_balance])
-                        .build()
-                        .unwrap(),
-                )
-                .unwrap();
-
-            let rt = tokio::runtime::Runtime::new().unwrap();
-            let instruments = rt.block_on(market_data::fetch_linear_instruments()).unwrap();
-            market_data::seed_instruments(&instruments);
-            for inst in &instruments {
-                if instrument_ids.contains(&inst.id()) {
-                    engine.add_instrument(inst).unwrap();
-                }
-            }
-            for id in instrument_ids {
-                let bars = rt
-                    .block_on(market_data::fetch_bars_cached(*id, timeframe))
-                    .unwrap();
-                log::info!("loaded {} bars for {}", bars.len(), id);
-                engine
-                    .add_data(bars.into_iter().map(Data::Bar).collect(), None, false, true)
-                    .unwrap();
-            }
-
-            engine.add_strategy(strategy).unwrap();
-            engine.run(start, end, None, false).unwrap();
+            engine::run_backtest(run, &BybitMarketData::new()?, instrument_ids, strategy)?;
         }
         Environment::Sandbox => todo!(),
         Environment::Live => {
