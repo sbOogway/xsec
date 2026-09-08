@@ -10,12 +10,17 @@
 //! it ranks the universe and how it splits the budget across legs.
 //!
 //! The rebalance clock and the capture join key both derive from the same
-//! [`crate::period::RebalancePeriod`] value (`StrategyRuntime::Period`) — a
-//! strategy declares its cadence once, rather than keying its clock guard and
-//! its `legs.csv`/`portfolio.csv` rows off two independent definitions of
-//! "what period is this."
+//! [`crate::period::RebalancePeriod`] value (`StrategyRuntime::Period`,
+//! produced by `StrategyRuntime::current_period`) — a strategy declares its
+//! cadence once, rather than keying its clock guard and its
+//! `legs.csv`/`portfolio.csv` rows off two independent definitions of "what
+//! period is this."
 
-use std::{collections::HashMap, fmt::Debug, time::Duration};
+use std::{
+    collections::{HashMap, HashSet},
+    fmt::Debug,
+    time::Duration,
+};
 
 use anyhow::{Result, anyhow};
 use nautilus_common::actor::DataActorNative;
@@ -43,7 +48,8 @@ use crate::{
 /// handle. Populated in `on_start`.
 ///
 /// Generic over the strategy's own rebalance period type `P` (a calendar
-/// month, an ISO week, ...) — see [`crate::period::RebalancePeriod`].
+/// month, a calendar day, an ISO week, ...) — see
+/// [`crate::period::RebalancePeriod`].
 pub struct RuntimeState<P: RebalancePeriod> {
     /// Instrument ids for the run's universe, resolved in `on_start`.
     pub instruments: Vec<InstrumentId>,
@@ -114,7 +120,8 @@ impl Market {
 pub trait StrategyRuntime:
     Strategy + StrategyNative + DataActorNative + Debug + Sized + 'static
 {
-    /// This strategy's rebalance cadence (a calendar month, an ISO week, ...).
+    /// This strategy's rebalance cadence (a calendar month, a calendar day, an
+    /// ISO week, ...).
     /// Also the join key `RunCapture` groups `legs.csv` / `portfolio.csv` rows
     /// by — one declaration drives both the clock and the capture schema.
     type Period: RebalancePeriod;
@@ -122,6 +129,13 @@ pub trait StrategyRuntime:
     fn runtime(&self) -> &RuntimeState<Self::Period>;
     fn runtime_mut(&mut self) -> &mut RuntimeState<Self::Period>;
     fn market(&self) -> Market;
+
+    /// The [`Self::Period`] a clock tick at `ts_nanos` falls in. A fixed-cadence
+    /// strategy returns `SomeConcretePeriod::from_nanos(ts_nanos)`; one with a
+    /// run-time `--holding-period` flag dispatches on it. Drives both
+    /// [`period_rolled`](Self::period_rolled) and the fill-fee accrual in
+    /// [`record_fill`](Self::record_fill).
+    fn current_period(&self, ts_nanos: u64) -> Self::Period;
 
     /// Open the run's capture files: the shared config rows plus whatever rows
     /// this strategy contributes. Call once from `on_start`.
@@ -166,7 +180,7 @@ pub trait StrategyRuntime:
     /// rebalance, else `None`. On a roll the caller does its work and then
     /// calls [`mark_rebalanced`](Self::mark_rebalanced) with the same period.
     fn period_rolled(&self, event: &TimeEvent) -> Option<Self::Period> {
-        let period = Self::Period::from_nanos(event.ts_event.as_u64());
+        let period = self.current_period(event.ts_event.as_u64());
         (self.runtime().last_period != Some(period)).then_some(period)
     }
 
@@ -197,6 +211,22 @@ pub trait StrategyRuntime:
         let open = self.cache().positions_open(None, None, None, None, None);
         for position in open {
             let _ = self.close_position(&position, None, None, None, None, None, None);
+        }
+    }
+
+    /// Close every open position whose instrument is in `instruments` — for a
+    /// carried-book strategy that turns over only the names that dropped out of
+    /// its target set, leaving the rest to ride.
+    fn close_positions(&mut self, instruments: &[InstrumentId]) {
+        if instruments.is_empty() {
+            return;
+        }
+        let wanted: HashSet<InstrumentId> = instruments.iter().copied().collect();
+        let open = self.cache().positions_open(None, None, None, None, None);
+        for position in open {
+            if wanted.contains(&position.instrument_id) {
+                let _ = self.close_position(&position, None, None, None, None, None, None);
+            }
         }
     }
 
@@ -267,20 +297,33 @@ pub trait StrategyRuntime:
         true
     }
 
-    /// Forward an `OrderFilled` to the capture layer.
+    /// Forward an `OrderFilled` to the capture layer, tagged with the rebalance
+    /// period its timestamp falls in.
     fn record_fill(&mut self, event: &OrderFilled) {
+        let period = self.current_period(event.ts_event.as_u64());
         if let Some(capture) = self.runtime_mut().capture.as_mut() {
-            capture.record_fill(event);
+            capture.record_fill(period, event);
         }
     }
 
-    /// Finalise capture at `on_stop`: price out every leg still open against the
-    /// latest close and flush.
+    /// Finalise capture at `on_stop` for the full-turnover flow: price out every
+    /// leg still open against the latest close and flush.
     fn finish_capture(&mut self) {
         let equity = self.usdt_equity();
         let latest_close = self.runtime().latest_closes();
         if let Some(capture) = self.runtime_mut().capture.as_mut() {
             capture.finish(&latest_close, equity);
+        }
+    }
+
+    /// Finalise capture at `on_stop` for the carried-book flow: mark the open
+    /// book to the latest close, write its last portfolio row and a `legs.csv`
+    /// row per still-open leg, and flush.
+    fn finish_book_capture(&mut self) {
+        let equity = self.usdt_equity();
+        let marks = self.runtime().latest_closes();
+        if let Some(capture) = self.runtime_mut().capture.as_mut() {
+            capture.finish_book(&marks, equity);
         }
     }
 }

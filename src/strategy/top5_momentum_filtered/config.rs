@@ -7,13 +7,14 @@ use anyhow::{Result, ensure};
 use clap::Args as ClapArgs;
 use nautilus_model::{enums::BarAggregation, identifiers::InstrumentId};
 
-use crate::strategy::common::Market;
+use crate::{period::HoldingPeriod, strategy::common::Market};
 
 /// The trading venue. Bybit-only: the data layer talks to the Bybit HTTP API
 /// and nothing else.
 pub const VENUE: &str = "BYBIT";
 
-/// Bar size the strategy ranks on: daily bars, rebalanced weekly.
+/// Bar size the strategy ranks on: always daily bars, whatever the rebalance
+/// cadence (`--holding-period`) is.
 pub const TIMEFRAME: BarAggregation = BarAggregation::Day;
 
 /// The market this strategy trades, for [`crate::strategy::common::StrategyRuntime`].
@@ -50,7 +51,7 @@ pub struct Args {
     #[arg(long, default_value_t = 0.5)]
     pub slow_weight: f64,
 
-    /// Number of names held long each week.
+    /// Number of names held long at a time.
     #[arg(long, default_value_t = 5)]
     pub top_n: usize,
 
@@ -68,9 +69,15 @@ pub struct Args {
     #[arg(long, default_value_t = 0.0)]
     pub allocation_tilt: f64,
 
-    /// Holding period, in weeks. Only `1` is currently supported.
+    /// Rebalance clock unit: which `RebalancePeriod` the cadence runs on
+    /// (`day`, `iso-week`, `month`).
+    #[arg(long, value_enum, default_value_t = HoldingPeriod::Day)]
+    pub holding_period: HoldingPeriod,
+
+    /// Number of `--holding-period` units the book is held before it is
+    /// re-ranked and fully turned over.
     #[arg(long, default_value_t = 1)]
-    pub holding_weeks: u16,
+    pub number_holding_periods: u32,
 }
 
 /// The resolved, validated top-5 momentum configuration the strategy holds.
@@ -88,7 +95,10 @@ pub struct Config {
     pub risk_fraction: f64,
     /// Within-book allocation tilt toward higher-conviction names (0 = equal).
     pub allocation_tilt: f64,
-    pub holding_weeks: u16,
+    /// Rebalance clock unit.
+    pub holding_period: HoldingPeriod,
+    /// Number of `holding_period` units between full turnovers.
+    pub number_holding_periods: u32,
 }
 
 /// Validate a parsed [`Args`] against the traded universe and resolve it into
@@ -146,9 +156,8 @@ pub fn build(args: &Args, bases: &[String]) -> Result<Config> {
     );
 
     ensure!(
-        args.holding_weeks == 1,
-        "--holding-weeks={} is not supported: the rebalance path assumes a one-week hold",
-        args.holding_weeks
+        args.number_holding_periods >= 1,
+        "--number-holding-periods must be >= 1"
     );
 
     ensure!(
@@ -167,7 +176,8 @@ pub fn build(args: &Args, bases: &[String]) -> Result<Config> {
         regime_lookback_days: args.regime_lookback_days,
         risk_fraction: args.risk_fraction,
         allocation_tilt: args.allocation_tilt,
-        holding_weeks: args.holding_weeks,
+        holding_period: args.holding_period,
+        number_holding_periods: args.number_holding_periods,
     })
 }
 
@@ -188,7 +198,14 @@ pub fn config_rows(cfg: &Config) -> Vec<(String, String)> {
         ),
         ("risk_fraction".to_string(), cfg.risk_fraction.to_string()),
         ("allocation_tilt".to_string(), cfg.allocation_tilt.to_string()),
-        ("holding_weeks".to_string(), cfg.holding_weeks.to_string()),
+        (
+            "holding_period".to_string(),
+            cfg.holding_period.as_str().to_string(),
+        ),
+        (
+            "number_holding_periods".to_string(),
+            cfg.number_holding_periods.to_string(),
+        ),
     ]
 }
 
@@ -240,7 +257,8 @@ mod tests {
         assert_eq!(cfg.regime_lookback_days, 20);
         assert_eq!(cfg.risk_fraction, 0.8);
         assert_eq!(cfg.allocation_tilt, 0.0);
-        assert_eq!(cfg.holding_weeks, 1);
+        assert_eq!(cfg.holding_period, HoldingPeriod::Day);
+        assert_eq!(cfg.number_holding_periods, 1);
     }
 
     #[test]
@@ -306,11 +324,22 @@ mod tests {
     }
 
     #[test]
-    fn rejects_multi_week_hold() {
-        let err = build(&args(&["--holding-weeks", "2"]), &bases(20))
+    fn cadence_flags_flow_through() {
+        let cfg = build(
+            &args(&["--holding-period", "iso-week", "--number-holding-periods", "3"]),
+            &bases(20),
+        )
+        .unwrap();
+        assert_eq!(cfg.holding_period, HoldingPeriod::IsoWeek);
+        assert_eq!(cfg.number_holding_periods, 3);
+    }
+
+    #[test]
+    fn rejects_zero_holding_periods() {
+        let err = build(&args(&["--number-holding-periods", "0"]), &bases(20))
             .unwrap_err()
             .to_string();
-        assert!(err.contains("one-week hold"), "{err}");
+        assert!(err.contains("--number-holding-periods must be >= 1"), "{err}");
     }
 
     #[test]

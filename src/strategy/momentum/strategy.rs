@@ -72,6 +72,9 @@ impl StrategyRuntime for XSectionalMomentum {
     fn market(&self) -> Market {
         config::MARKET
     }
+    fn current_period(&self, ts_nanos: u64) -> YearMonth {
+        YearMonth::from_nanos(ts_nanos)
+    }
 }
 
 impl Debug for XSectionalMomentum {

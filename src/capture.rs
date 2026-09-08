@@ -18,10 +18,24 @@
 //! `equity_end_of_period_usdt`. They are *not* the mean per-leg return — that
 //! would ignore how much of the account is actually deployed.
 //!
+//! Two capture flows share this file format. **Full turnover**
+//! ([`record_rebalance`](RunCapture::record_rebalance) +
+//! [`finalise_completed`](RunCapture::finalise_completed)): every leg is
+//! entered and exited within one period, and the period's PnL is those legs'
+//! close-to-close move — `momentum` uses this. **Carried book**
+//! ([`record_book_turnover`](RunCapture::record_book_turnover) +
+//! [`finish_book`](RunCapture::finish_book)): a leg can span many turnovers,
+//! each period's PnL is the whole open book marked close-to-close over that
+//! period, a leg's `legs.csv` row is written once (when it finally closes,
+//! spanning its full hold), and a portfolio row's `n_long` / `n_short` is the
+//! book size over the period rather than the count entered —
+//! `top5-momentum-filtered` uses this.
+//!
 //! `RunCapture` is generic over [`crate::period::RebalancePeriod`]: the
 //! `period` / `period_end_date` columns and the finalisation logic below work
-//! the same way whatever cadence a strategy rebalances on — a calendar month
-//! or an ISO week are both just implementations of that trait.
+//! the same way whatever cadence a strategy rebalances on — a calendar month,
+//! an ISO week and a run-time-selected `CalendarPeriod` are all just
+//! implementations of that trait.
 
 use std::{
     collections::{BTreeMap, HashMap},
@@ -31,7 +45,7 @@ use std::{
 };
 
 use anyhow::{Context, Result};
-use chrono::Utc;
+use chrono::{NaiveDate, Utc};
 use nautilus_model::{enums::OrderSide, events::OrderFilled, identifiers::InstrumentId};
 use rust_decimal::Decimal;
 
@@ -53,12 +67,26 @@ pub const FILLS_HEADER: &str =
 pub use crate::config::RunConfig;
 
 /// A leg the strategy has entered but not yet priced out (the exit mark is
-/// only known one rebalance later).
+/// only known one rebalance later). Full-turnover flow.
 struct PendingLeg {
     instrument: InstrumentId,
     side: OrderSide,
     entry_price: Decimal,
     notional_usdt: f64,
+}
+
+/// A leg the carried-book flow is holding: entered at `entry_period`, marked
+/// forward to `mark` at the last turnover, still open. Priced out only when it
+/// leaves the target set (or at `on_stop`).
+struct OpenLeg<P> {
+    side: OrderSide,
+    entry_price: Decimal,
+    notional_usdt: f64,
+    entry_period: P,
+    /// Close the leg was last marked to — the reference for the *next*
+    /// period's contribution, so the per-period moves telescope to the full
+    /// `(exit - entry) / entry`.
+    mark: Decimal,
 }
 
 /// Everything captured for one rebalance period until it can be finalised.
@@ -76,8 +104,15 @@ pub struct RunCapture<P: RebalancePeriod> {
     legs: BufWriter<File>,
     portfolio: BufWriter<File>,
     fills: BufWriter<File>,
-    /// Rebalance periods awaiting finalisation, oldest first.
+    /// Rebalance periods awaiting finalisation (full-turnover flow) and/or
+    /// carrying fee accrual (both flows), oldest first.
     periods: BTreeMap<P, PeriodAccrual>,
+    /// The carried book: one entry per instrument currently held. Empty for
+    /// the full-turnover flow.
+    open_book: BTreeMap<InstrumentId, OpenLeg<P>>,
+    /// The last turnover period recorded by the carried-book flow — the period
+    /// whose portfolio row the next turnover finalises.
+    last_turnover: Option<P>,
 }
 
 impl<P: RebalancePeriod> RunCapture<P> {
@@ -116,17 +151,22 @@ impl<P: RebalancePeriod> RunCapture<P> {
             portfolio,
             fills,
             periods: BTreeMap::new(),
+            open_book: BTreeMap::new(),
+            last_turnover: None,
         })
     }
 
     /// Record an `OrderFilled` event: one fills row now, plus the fee and fill
-    /// count folded into that rebalance period's accrual.
-    pub fn record_fill(&mut self, event: &OrderFilled) {
+    /// count folded into `period`'s accrual. `period` is the rebalance period
+    /// the fill's timestamp falls in (the caller resolves it via
+    /// `StrategyRuntime::current_period`).
+    pub fn record_fill(&mut self, period: P, event: &OrderFilled) {
         let fee = event
             .commission
             .map(|m| m.as_decimal())
             .unwrap_or(Decimal::ZERO);
         self.record_fill_row(
+            period,
             event.ts_event.as_u64(),
             event.instrument_id,
             event.order_side,
@@ -137,9 +177,12 @@ impl<P: RebalancePeriod> RunCapture<P> {
     }
 
     /// The primitive behind [`record_fill`](Self::record_fill), split out so it
-    /// can be exercised without constructing a full `OrderFilled`.
+    /// can be exercised without constructing a full `OrderFilled`. The columns
+    /// it writes are the `fills.csv` contract, hence the wide signature.
+    #[allow(clippy::too_many_arguments)]
     pub fn record_fill_row(
         &mut self,
+        period: P,
         ts_event: u64,
         instrument: InstrumentId,
         order_side: OrderSide,
@@ -147,7 +190,6 @@ impl<P: RebalancePeriod> RunCapture<P> {
         fill_price: Decimal,
         fee_usdt: Decimal,
     ) {
-        let period = P::from_nanos(ts_event);
         let _ = writeln!(
             self.fills,
             "{},{},{},{},{},{},{},{}",
@@ -257,33 +299,259 @@ impl<P: RebalancePeriod> RunCapture<P> {
             let notional = Decimal::try_from(leg.notional_usdt).unwrap_or(Decimal::ZERO);
             leg_pnl_usdt += signed * notional;
 
-            let _ = writeln!(
-                self.legs,
-                "{},{},{},{},{},{},{},{},{}",
-                self.run_id,
-                period_label,
+            self.write_leg_row(
+                &period_label,
                 period_end_date,
                 leg.instrument,
-                side_label_from_order(leg.side),
-                leg.entry_price.normalize(),
-                exit_price.normalize(),
-                round_6dp(signed),
+                leg.side,
+                leg.entry_price,
+                exit_price,
+                signed,
                 leg.notional_usdt,
             );
         }
-        let _ = self.legs.flush();
 
-        // Both `gross_return` and the fee drag are expressed as a fraction of
-        // the period's *opening* equity, so the series compounds as an
-        // account-level return that lines up with `equity_end_of_period_usdt`
-        // (modulo the bar-math vs simulated-account differences the README
-        // spells out). Dividing by notional instead would overstate the return
-        // by roughly equity / notional_deployed.
         let equity_start = accrual.equity_start.unwrap_or(equity_end);
+        self.write_portfolio_row(
+            &period_label,
+            period_end_date,
+            n_long,
+            n_short,
+            leg_pnl_usdt,
+            accrual.fee_paid,
+            accrual.n_fills,
+            equity_start,
+            equity_end,
+        );
+    }
+
+    // --- carried-book flow ------------------------------------------------
+
+    /// Record a turnover of the carried book at `turnover_period`:
+    ///
+    /// 1. mark every leg still open to `marks`, book its close-to-close move
+    ///    since the last turnover into the *previous* turnover period, and
+    ///    write that period's portfolio row;
+    /// 2. price out and write a `legs.csv` row for each instrument in `closed`;
+    /// 3. start tracking each leg in `opened`
+    ///    (`(instrument, side, entry_price, notional_usdt)`).
+    ///
+    /// `marks` must cover every held and every just-closed instrument.
+    pub fn record_book_turnover(
+        &mut self,
+        turnover_period: P,
+        equity: Decimal,
+        marks: &HashMap<InstrumentId, Decimal>,
+        opened: &[(InstrumentId, OrderSide, Decimal, f64)],
+        closed: &[InstrumentId],
+    ) {
+        // 1. mark the book forward and finalise the period that just ended.
+        if let Some(prev) = self.last_turnover {
+            let mut n_long = 0u32;
+            let mut n_short = 0u32;
+            let mut leg_pnl_usdt = Decimal::ZERO;
+            for (instrument, leg) in self.open_book.iter_mut() {
+                match leg.side {
+                    OrderSide::Sell => n_short += 1,
+                    _ => n_long += 1,
+                }
+                let Some(&mark_now) = marks.get(instrument) else {
+                    continue;
+                };
+                if leg.entry_price.is_zero() {
+                    continue;
+                }
+                let raw = (mark_now - leg.mark) / leg.entry_price;
+                let signed = match leg.side {
+                    OrderSide::Sell => -raw,
+                    _ => raw,
+                };
+                let notional = Decimal::try_from(leg.notional_usdt).unwrap_or(Decimal::ZERO);
+                leg_pnl_usdt += signed * notional;
+                leg.mark = mark_now;
+            }
+            let accrual = self.periods.remove(&prev).unwrap_or_default();
+            self.write_portfolio_row(
+                &prev.label(),
+                prev.end_date(),
+                n_long,
+                n_short,
+                leg_pnl_usdt,
+                accrual.fee_paid,
+                accrual.n_fills,
+                accrual.equity_start.unwrap_or(equity),
+                equity,
+            );
+        }
+
+        // 2. price out the legs that left the book.
+        for instrument in closed {
+            let Some(leg) = self.open_book.remove(instrument) else {
+                continue;
+            };
+            self.write_closed_leg(&leg, *instrument, marks.get(instrument).copied());
+        }
+
+        // 3. start tracking the new legs.
+        for &(instrument, side, entry_price, notional_usdt) in opened {
+            self.open_book.insert(
+                instrument,
+                OpenLeg {
+                    side,
+                    entry_price,
+                    notional_usdt,
+                    entry_period: turnover_period,
+                    mark: entry_price,
+                },
+            );
+        }
+
+        self.periods
+            .entry(turnover_period)
+            .or_default()
+            .equity_start
+            .get_or_insert(equity);
+        self.last_turnover = Some(turnover_period);
+    }
+
+    /// Close the carried book at `on_stop`: mark every still-open leg to
+    /// `marks`, write the final portfolio row and a `legs.csv` row per leg,
+    /// then flush.
+    pub fn finish_book(&mut self, marks: &HashMap<InstrumentId, Decimal>, equity: Decimal) {
+        if let Some(prev) = self.last_turnover.take() {
+            let mut n_long = 0u32;
+            let mut n_short = 0u32;
+            let mut leg_pnl_usdt = Decimal::ZERO;
+            for (instrument, leg) in self.open_book.iter_mut() {
+                match leg.side {
+                    OrderSide::Sell => n_short += 1,
+                    _ => n_long += 1,
+                }
+                let Some(&mark_now) = marks.get(instrument) else {
+                    continue;
+                };
+                if leg.entry_price.is_zero() {
+                    continue;
+                }
+                let raw = (mark_now - leg.mark) / leg.entry_price;
+                let signed = match leg.side {
+                    OrderSide::Sell => -raw,
+                    _ => raw,
+                };
+                let notional = Decimal::try_from(leg.notional_usdt).unwrap_or(Decimal::ZERO);
+                leg_pnl_usdt += signed * notional;
+                leg.mark = mark_now;
+            }
+            let accrual = self.periods.remove(&prev).unwrap_or_default();
+            self.write_portfolio_row(
+                &prev.label(),
+                prev.end_date(),
+                n_long,
+                n_short,
+                leg_pnl_usdt,
+                accrual.fee_paid,
+                accrual.n_fills,
+                accrual.equity_start.unwrap_or(equity),
+                equity,
+            );
+        }
+
+        let book = std::mem::take(&mut self.open_book);
+        for (instrument, leg) in book {
+            self.write_closed_leg(&leg, instrument, marks.get(&instrument).copied());
+        }
+
+        let _ = self.legs.flush();
+        let _ = self.portfolio.flush();
+        let _ = self.fills.flush();
+    }
+
+    /// Write the `legs.csv` row for a leg leaving the carried book, priced out
+    /// at `exit_price` (skipped if there is no mark for the instrument).
+    fn write_closed_leg(
+        &mut self,
+        leg: &OpenLeg<P>,
+        instrument: InstrumentId,
+        exit_price: Option<Decimal>,
+    ) {
+        let Some(exit_price) = exit_price else {
+            return;
+        };
+        if leg.entry_price.is_zero() {
+            return;
+        }
+        let raw = (exit_price - leg.entry_price) / leg.entry_price;
+        let signed = match leg.side {
+            OrderSide::Sell => -raw,
+            _ => raw,
+        };
+        self.write_leg_row(
+            &leg.entry_period.label(),
+            leg.entry_period.end_date(),
+            instrument,
+            leg.side,
+            leg.entry_price,
+            exit_price,
+            signed,
+            leg.notional_usdt,
+        );
+    }
+
+    // --- shared row writers ---------------------------------------------
+
+    /// One `legs.csv` row. `signed_return` is the leg's close-to-close return
+    /// with the position's direction already applied.
+    #[allow(clippy::too_many_arguments)]
+    fn write_leg_row(
+        &mut self,
+        period_label: &str,
+        period_end_date: NaiveDate,
+        instrument: InstrumentId,
+        side: OrderSide,
+        entry_price: Decimal,
+        exit_price: Decimal,
+        signed_return: Decimal,
+        notional_usdt: f64,
+    ) {
+        let _ = writeln!(
+            self.legs,
+            "{},{},{},{},{},{},{},{},{}",
+            self.run_id,
+            period_label,
+            period_end_date,
+            instrument,
+            side_label_from_order(side),
+            entry_price.normalize(),
+            exit_price.normalize(),
+            round_6dp(signed_return),
+            notional_usdt,
+        );
+        let _ = self.legs.flush();
+    }
+
+    /// One `portfolio.csv` row. `gross_return` and the fee drag are both a
+    /// fraction of the period's *opening* equity, so the series compounds as an
+    /// account-level return that lines up with `equity_end_of_period_usdt`
+    /// (modulo the bar-math vs simulated-account differences the README spells
+    /// out). Dividing by notional instead would overstate the return by
+    /// roughly equity / notional_deployed.
+    #[allow(clippy::too_many_arguments)]
+    fn write_portfolio_row(
+        &mut self,
+        period_label: &str,
+        period_end_date: NaiveDate,
+        n_long: u32,
+        n_short: u32,
+        leg_pnl_usdt: Decimal,
+        fee_paid: Decimal,
+        n_fills: u32,
+        equity_start: Decimal,
+        equity_end: Decimal,
+    ) {
         let (gross_return, fee_drag) = if equity_start.is_zero() {
             (Decimal::ZERO, Decimal::ZERO)
         } else {
-            (leg_pnl_usdt / equity_start, accrual.fee_paid / equity_start)
+            (leg_pnl_usdt / equity_start, fee_paid / equity_start)
         };
         let net_return = gross_return - fee_drag;
 
@@ -296,10 +564,10 @@ impl<P: RebalancePeriod> RunCapture<P> {
             n_long,
             n_short,
             round_6dp(gross_return),
-            accrual.fee_paid.normalize(),
+            fee_paid.normalize(),
             round_6dp(net_return),
             equity_end.normalize(),
-            accrual.n_fills,
+            n_fills,
             self.fills_ref,
         );
         let _ = self.portfolio.flush();

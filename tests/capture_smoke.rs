@@ -112,6 +112,7 @@ fn capture_writes_the_contract() {
     for m in MONTHS {
         let ts = month_start_nanos(m);
         capture.record_fill_row(
+            m,
             ts,
             long,
             OrderSide::Buy,
@@ -120,6 +121,7 @@ fn capture_writes_the_contract() {
             fee_per_month / Decimal::from(2),
         );
         capture.record_fill_row(
+            m,
             ts,
             short,
             OrderSide::Sell,
@@ -318,6 +320,129 @@ fn capture_writes_the_contract_for_a_weekly_cadence() {
         );
         assert_eq!(&row[9], "0", "no fills recorded in this smoke test");
     }
+}
+
+/// The carried-book flow ([`RunCapture::record_book_turnover`] +
+/// [`RunCapture::finish_book`]): a leg that survives a turnover rides on
+/// untouched, its `legs.csv` row is written once when it finally closes, and
+/// each period's portfolio PnL is the whole open book marked close-to-close
+/// over that period — so the per-period contributions of a multi-turnover leg
+/// telescope to its full `(exit - entry) / entry`.
+#[test]
+fn capture_writes_the_contract_for_a_carried_book() {
+    let dir = tempdir().unwrap();
+    let a = InstrumentId::from("AAAUSDT-LINEAR.BYBIT");
+    let b = InstrumentId::from("BBBUSDT-LINEAR.BYBIT");
+    let c = InstrumentId::from("CCCUSDT-LINEAR.BYBIT");
+    let run_id = "test-0002-carried";
+
+    let cfg = RunConfig {
+        run_id: run_id.to_string(),
+        strategy: "top5_momentum_filtered".to_string(),
+        date_start: "2026-01-01".to_string(),
+        date_end: "2026-04-01".to_string(),
+        bases: vec!["AAA".to_string(), "BBB".to_string(), "CCC".to_string()],
+        starting_balance: "1000 USDT".to_string(),
+        universe_path: "universe.txt".to_string(),
+        argv: "xsec --uuid test-0002-carried".to_string(),
+    };
+
+    let mut capture: RunCapture<YearMonth> = RunCapture::open_in(dir.path(), &cfg, &[]).unwrap();
+    let ym = |month| YearMonth { year: 2026, month };
+    let equity = Decimal::from(1000);
+
+    // Jan: open A and B @ 100, notional 400 each.
+    let jan_marks = HashMap::from([(a, Decimal::from(100)), (b, Decimal::from(100))]);
+    capture.record_book_turnover(
+        ym(1),
+        equity,
+        &jan_marks,
+        &[
+            (a, OrderSide::Buy, Decimal::from(100), 400.0),
+            (b, OrderSide::Buy, Decimal::from(100), 400.0),
+        ],
+        &[],
+    );
+
+    // Feb: A +10% and rides, B -10% and drops out, C joins @ 100 notional 300.
+    let feb_marks = HashMap::from([
+        (a, Decimal::from(110)),
+        (b, Decimal::from(90)),
+        (c, Decimal::from(100)),
+    ]);
+    capture.record_book_turnover(
+        ym(2),
+        equity,
+        &feb_marks,
+        &[(c, OrderSide::Buy, Decimal::from(100), 300.0)],
+        &[b],
+    );
+
+    // Close out in Mar: A now 121 (another +10% on the 110 mark), C flat.
+    let mar_marks = HashMap::from([
+        (a, Decimal::from(121)),
+        (b, Decimal::from(99)),
+        (c, Decimal::from(100)),
+    ]);
+    capture.finish_book(&mar_marks, Decimal::from(1044));
+    drop(capture);
+
+    let run_dir = dir.path().join(run_id);
+    let legs = read_csv(run_dir.join("legs.csv"));
+    let portfolio = read_csv(run_dir.join("portfolio.csv"));
+
+    assert_eq!(legs.header, LEGS_HEADER);
+    assert_eq!(portfolio.header, PORTFOLIO_HEADER);
+
+    // One portfolio row per completed period (Jan, Feb); Mar's book is closed
+    // by `finish_book`.
+    assert_eq!(portfolio.rows.len(), 2, "Jan and Feb");
+    let by_period = |rows: &[Vec<String>], p: &str| {
+        rows.iter()
+            .find(|r| r[1] == p)
+            .cloned()
+            .unwrap_or_else(|| panic!("no row for {p}"))
+    };
+
+    // Jan: A +40, B -40 on 1000 opening equity => 0.
+    let jan = by_period(&portfolio.rows, "2026-01");
+    assert_eq!(jan[3], "2", "n_long counts the whole book held over Jan");
+    assert_eq!(jan[5], "0.000000", "gross_return Jan");
+    // Feb: only A is still marked-to-market (C flat), +11 on the 110->121 move
+    // against 100 entry * 400 notional = 44, on 1000 => 0.044.
+    let feb = by_period(&portfolio.rows, "2026-02");
+    assert_eq!(feb[3], "2", "n_long: A carried + C opened");
+    assert_eq!(feb[5], "0.044000", "gross_return Feb");
+
+    // One leg row per leg, written when it closed, spanning its whole hold.
+    assert_eq!(legs.rows.len(), 3);
+    let leg = |rows: &[Vec<String>], inst: &str| {
+        rows.iter()
+            .find(|r| r[3] == inst)
+            .cloned()
+            .unwrap_or_else(|| panic!("no leg for {inst}"))
+    };
+    let a_leg = leg(&legs.rows, a.to_string().as_str());
+    assert_eq!(
+        a_leg[1], "2026-01",
+        "A's leg is keyed to its Jan entry period"
+    );
+    assert_eq!(
+        (&a_leg[5], &a_leg[6]),
+        (&"100".to_string(), &"121".to_string())
+    );
+    assert_eq!(
+        a_leg[7], "0.210000",
+        "A's full-hold return telescopes to +21%"
+    );
+    let b_leg = leg(&legs.rows, b.to_string().as_str());
+    assert_eq!(
+        b_leg[7], "-0.100000",
+        "B closed at -10% when it dropped out"
+    );
+    let c_leg = leg(&legs.rows, c.to_string().as_str());
+    assert_eq!(c_leg[1], "2026-02");
+    assert_eq!(c_leg[7], "0.000000");
 }
 
 struct Csv {

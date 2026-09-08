@@ -8,7 +8,7 @@ drives the Rust binary directly — see below).
 - `tearsheet.py` — a [QuantStats](https://github.com/ranaroussi/quantstats)
   HTML tearsheet from the portfolio return series.
 - `legs.py` — per-leg diagnostics (attribution, long/short book, return
-  distribution, monthly breakdown) from `legs.csv`.
+  distribution, per-period breakdown) from `legs.csv`.
 - `optimize.py` — an [Optuna](https://optuna.org/) search over the momentum
   strategy's flags, with an in-sample / out-of-sample split so the search
   can't just overfit the whole backtest window.
@@ -46,11 +46,11 @@ charts as base64 PNG, no external references). Four sections:
 - **Per-instrument attribution** — legs, win rate, mean/median return and total
   USDT PnL (`per_leg_return × notional_usdt`) per instrument, plus a
   best/worst-contributors bar chart.
-- **Long vs short book** — per-side stats and cumulative/monthly PnL by book.
+- **Long vs short book** — per-side stats and cumulative/per-period PnL by book.
 - **Leg return distribution** — hit rate, avg win/loss, payoff, skew/kurtosis,
   a long/short histogram and the 10 best/worst legs.
-- **Per rebalance period leg breakdown** — leg count, mean return, dispersion,
-  min/max and the long−short spread each period.
+- **Per-period leg breakdown** — leg count, mean return, dispersion, min/max
+  and the long−short spread, grouped by each leg's entry period.
 
 A leg "wins" when `per_leg_return > 0` (a flat leg is not a win).
 
@@ -124,13 +124,31 @@ not installed.
 ## Return definition (v1)
 
 `legs.csv` per-leg return is a **close-to-close holding-period return**:
-`(exit_price - entry_price) / entry_price`, signed by side, where `entry_price`
-is the last completed bar close before the entry rebalance and `exit_price` is
-that instrument's close one rebalance later. This is **price return only** —
-no funding-rate carry on the perpetual leg (a future feature).
+`(exit_price - entry_price) / entry_price`, signed by side. `entry_price` is
+the last completed bar close before the leg was opened; `exit_price` is the
+close when it was closed. This is **price return only** — no funding-rate carry
+on the perpetual leg (a future feature).
+
+How long a leg lives — and how its PnL lands in `portfolio.csv` — depends on
+the strategy's capture flow (`src/capture.rs`):
+
+- **Full turnover** (`momentum`) — the book is rebuilt from scratch every
+  rebalance, so every leg is opened and closed exactly one period apart.
+  `exit_price` is that instrument's close one rebalance later; a period's
+  `gross_return` sums the close-to-close PnL of the legs entered that period;
+  a portfolio row's `n_long` / `n_short` counts those entries.
+- **Carried book** (`top5-momentum-filtered`) — a name still in the target set
+  at a re-rank rides on untouched, so a leg can span many periods and gets
+  exactly one `legs.csv` row, written when it finally closes and covering the
+  whole hold. A period's `gross_return` marks the *entire open book*
+  close-to-close over that period (every held leg, not just fresh entries),
+  and `n_long` / `n_short` is the book size. The per-period contributions of a
+  multi-period leg sum to its `legs.csv` `per_leg_return`. (With
+  `--number-holding-periods > 1` there is one row per re-rank, spanning that
+  many periods.)
 
 `portfolio.gross_return` is an **account-level** per-rebalance-period return:
-the period's summed leg PnL — each leg's close-to-close return times its USDT
+the period's summed leg PnL — each leg's close-to-close move times its USDT
 notional — divided by the period's *opening* equity. `portfolio.net_return` is
 `gross_return - fee_paid_usdt / equity_start_of_period`. Because the divisor is
 equity (not deployed notional), compounding the `net_return` series tracks the
@@ -145,9 +163,9 @@ cross-check.
 
 `period` / `period_end_date` are cadence-agnostic: a monthly strategy's period
 label looks like `2026-03` (end date the month's last day), a weekly one's
-looks like `2026-W12` (end date that ISO week's Sunday) — both are just
-implementations of the same `RebalancePeriod` trait
-(`src/period.rs`) driving `RunCapture` (`src/capture.rs`).
+`2026-W12` (end date that ISO week's Sunday), a daily one's `2026-03-14` — all
+just implementations of the same `RebalancePeriod` trait (`src/period.rs`)
+driving `RunCapture` (`src/capture.rs`).
 
 ## Tests
 
