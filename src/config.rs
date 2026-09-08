@@ -17,8 +17,8 @@ use nautilus_core::UnixNanos;
 use nautilus_model::types::Money;
 use uuid::Uuid;
 
+use crate::data::universe::read_universe;
 use crate::strategy::StrategyKind;
-use crate::universe::read_universe;
 
 /// Cross-sectional strategy backtests over Bybit USDT-margined linear
 /// perpetuals. Pick a strategy with a subcommand; `--help` on the subcommand

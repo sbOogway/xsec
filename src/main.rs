@@ -19,7 +19,7 @@ use nautilus_live::node::LiveNode;
 
 use xsec::{
     config::{self, CliArgs, RunConfig},
-    data,
+    data::exchange::bybit as market_data,
     strategy::{
         StrategyKind,
         common::StrategyRuntime,
@@ -95,8 +95,8 @@ fn run_engine<S: StrategyRuntime>(
                 .unwrap();
 
             let rt = tokio::runtime::Runtime::new().unwrap();
-            let instruments = rt.block_on(data::fetch_linear_instruments()).unwrap();
-            data::seed_instruments(&instruments);
+            let instruments = rt.block_on(market_data::fetch_linear_instruments()).unwrap();
+            market_data::seed_instruments(&instruments);
             for inst in &instruments {
                 if instrument_ids.contains(&inst.id()) {
                     engine.add_instrument(inst).unwrap();
@@ -104,7 +104,7 @@ fn run_engine<S: StrategyRuntime>(
             }
             for id in instrument_ids {
                 let bars = rt
-                    .block_on(data::fetch_bars_cached(*id, timeframe))
+                    .block_on(market_data::fetch_bars_cached(*id, timeframe))
                     .unwrap();
                 log::info!("loaded {} bars for {}", bars.len(), id);
                 engine

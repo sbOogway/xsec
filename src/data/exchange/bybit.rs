@@ -1,3 +1,8 @@
+//! Bybit data adapter: bar-type construction, the on-disk bar cache, and the
+//! shared HTTP client that fetches linear-perp instruments and monthly bar
+//! history. Used by the backtest bootstrap in `src/main.rs` and by the
+//! rebalance runtime in [`crate::strategy::common`].
+
 use std::{fs, path::PathBuf};
 
 use anyhow::{Context, Result};
@@ -109,50 +114,4 @@ pub fn parse_date(s: &str) -> Result<DateTime<Utc>> {
     DateTime::parse_from_rfc3339(s)
         .map(|d| d.with_timezone(&Utc))
         .with_context(|| format!("parse date {s}"))
-}
-
-pub mod structure {
-    use std::collections::VecDeque;
-
-    // #[derive(Clone)]
-    pub struct BoundedQueue<T> {
-        pub inner: VecDeque<T>,
-        capacity: usize,
-    }
-
-    impl<T> BoundedQueue<T> {
-        pub fn new(capacity: usize) -> Self {
-            Self {
-                inner: VecDeque::with_capacity(capacity),
-                capacity,
-            }
-        }
-
-        // pub fn get(self) -> VecDeque<T> {
-        //     // self.inner.clone()
-        // }
-
-        // VARIANT A: Reject the item if full
-        pub fn try_push_back(&mut self, item: T) -> Result<(), T> {
-            if self.inner.len() >= self.capacity {
-                return Err(item); // Return item back to caller
-            }
-            self.inner.push_back(item);
-            Ok(())
-        }
-
-        // VARIANT B: Evict the oldest item (ring buffer behavior)
-        pub fn push_back_overwrite(&mut self, item: T) -> Option<T> {
-            let mut evicted = None;
-            if self.inner.len() >= self.capacity {
-                evicted = self.inner.pop_front(); // Evict oldest
-            }
-            self.inner.push_back(item);
-            evicted
-        }
-
-        pub fn pop_front(&mut self) -> Option<T> {
-            self.inner.pop_front()
-        }
-    }
 }

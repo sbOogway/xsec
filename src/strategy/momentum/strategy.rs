@@ -23,9 +23,11 @@ use rust_decimal::{Decimal, prelude::ToPrimitive};
 
 use crate::{
     config::RunConfig,
-    period::{CalendarPeriod, RebalancePeriod},
-    sizing::{self, Conviction},
-    strategy::common::{Market, RuntimeState, StrategyRuntime, btc_instrument_id, n_day_return},
+    strategy::common::{
+        Market, RuntimeState, StrategyRuntime, btc_instrument_id, n_day_return,
+        period::{CalendarPeriod, RebalancePeriod},
+        sizing::{self, Conviction},
+    },
 };
 
 use super::config::{self, Config};

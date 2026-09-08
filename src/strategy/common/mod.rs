@@ -9,12 +9,18 @@
 //! methods. What stays in the strategy's own `strategy.rs` is the signal: how
 //! it ranks the universe and how it splits the budget across legs.
 //!
+//! Submodules: the rebalance-cadence types ([`period`]), percent-of-equity
+//! position sizing ([`sizing`]) and the rolling price buffer ([`buffer`]).
+//!
 //! The rebalance clock and the capture join key both derive from the same
-//! [`crate::period::RebalancePeriod`] value (`StrategyRuntime::Period`,
-//! produced by `StrategyRuntime::current_period`) — a strategy declares its
-//! cadence once, rather than keying its clock guard and its
-//! `legs.csv`/`portfolio.csv` rows off two independent definitions of "what
-//! period is this."
+//! [`period::RebalancePeriod`] value (`StrategyRuntime::Period`, produced by
+//! `StrategyRuntime::current_period`) — a strategy declares its cadence once,
+//! rather than keying its clock guard and its `legs.csv`/`portfolio.csv` rows
+//! off two independent definitions of "what period is this."
+
+pub mod buffer;
+pub mod period;
+pub mod sizing;
 
 use std::{
     collections::{HashMap, HashSet},
@@ -37,11 +43,11 @@ use nautilus_trading::{Strategy, StrategyNative};
 use rust_decimal::Decimal;
 
 use crate::{
-    capture::RunCapture,
     config::RunConfig,
-    data::{get_bar_type, structure::BoundedQueue},
-    period::RebalancePeriod,
+    data::{backtest::RunCapture, exchange::bybit::get_bar_type},
 };
+
+use self::{buffer::BoundedQueue, period::RebalancePeriod};
 
 /// Per-run state every strategy carries: the resolved universe, the rebalance
 /// clock marker, the rolling close-price buffers and the artifact-capture
@@ -49,7 +55,7 @@ use crate::{
 ///
 /// Generic over the strategy's own rebalance period type `P` (a calendar
 /// month, a calendar day, an ISO week, ...) — see
-/// [`crate::period::RebalancePeriod`].
+/// [`period::RebalancePeriod`].
 pub struct RuntimeState<P: RebalancePeriod> {
     /// Instrument ids for the run's universe, resolved in `on_start`.
     pub instruments: Vec<InstrumentId>,

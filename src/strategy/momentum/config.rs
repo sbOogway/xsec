@@ -7,7 +7,7 @@ use anyhow::{Result, ensure};
 use clap::Args as ClapArgs;
 use nautilus_model::{enums::BarAggregation, identifiers::InstrumentId};
 
-use crate::{period::HoldingPeriod, strategy::common::Market};
+use crate::strategy::common::{Market, period::HoldingPeriod};
 
 /// The trading venue. Bybit-only: the data layer talks to the Bybit HTTP API
 /// and nothing else.
