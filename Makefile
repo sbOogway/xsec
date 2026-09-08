@@ -27,16 +27,29 @@ UUID := $(UUID)
 # (--uuid, --universe, --date-*, --starting-balance).
 STRATEGY ?= momentum
 
-.PHONY: tearsheet backtest report optimize snapshot_bybit_top snapshot_coingecko_top snapshot_coingecko_bybit_top
+# The coin universe. `make fetch` and `make backtest` both read it, so a
+# non-default universe stays consistent across the two:
+#   make fetch UNIVERSE=coins/my_universe.txt
+#   make tearsheet UNIVERSE=coins/my_universe.txt
+UNIVERSE ?= universe.txt
+
+.PHONY: fetch tearsheet backtest report optimize snapshot_bybit_top snapshot_coingecko_top snapshot_coingecko_bybit_top
+
+## Download Bybit instruments + bar history for $(UNIVERSE) into data/.
+## Run once before `make backtest` / `make tearsheet`; re-run to refresh
+## (FETCH_ARGS="--refresh" forces a re-download of still-fresh caches).
+fetch:
+	cargo run --bin xsec -- fetch --universe "$(UNIVERSE)" $(FETCH_ARGS)
 
 ## Run the backtest and build the tearsheet for $(UUID).
 tearsheet: backtest report
 
 ## Run the backtest binary, tee-ing its output to logs/<UUID>/logs.log.
+## Reads the data/ cache only — run `make fetch` first.
 ## Extra flags: make backtest ARGS="--top-n 3 --short-n 3 --long-w 0.7"
 backtest:
 	@mkdir -p logs/$(UUID)
-	cargo run --bin xsec -- --uuid "$(UUID)" $(STRATEGY) $(ARGS) 2>&1 | tee logs/$(UUID)/logs.log
+	cargo run --bin xsec -- --uuid "$(UUID)" --universe "$(UNIVERSE)" $(STRATEGY) $(ARGS) 2>&1 | tee logs/$(UUID)/logs.log
 
 ## Render runs/<UUID>/{tearsheet,legs}.html from the captured CSVs.
 report:

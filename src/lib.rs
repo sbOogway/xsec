@@ -8,8 +8,10 @@
 //!   [`strategy::common`] mechanics, which in turn owns the percent-of-equity
 //!   [`sizing`](strategy::common::sizing) helpers and the rolling price
 //!   [`buffer`](strategy::common::buffer).
-//! * [`data`] — the market-data seam ([`data::exchange::MarketData`], with the
-//!   Bybit fetch/cache adapter in [`data::exchange::bybit`]), the
+//! * [`data`] — the market-data seam ([`data::exchange::MarketData`]): the
+//!   offline `data/` cache the backtest reads ([`data::exchange::CachedMarketData`]),
+//!   the Bybit HTTP fetcher ([`data::exchange::bybit`]) and the `xsec fetch`
+//!   driver ([`data::fetch`]) that fills the cache, plus the
 //!   [`universe`](data::universe) file reader and run-artifact
 //!   [`capture`](data::backtest).
 //! * [`engine`] — the backtest bootstrap: `RunConfig` + `MarketData` + strategy

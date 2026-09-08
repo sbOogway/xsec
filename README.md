@@ -20,12 +20,30 @@ Each run produces two per-run HTML reports alongside the log: a QuantStats
 
 - Rust toolchain (edition 2024)
 - [`uv`](https://docs.astral.sh/uv/) for the Python tearsheet step
-- Bybit HTTP API reachable (bar history is fetched on first run and cached
-  under `data/`, which is gitignored)
+- Bybit HTTP API reachable for `make fetch` (see below). Backtests themselves
+  run offline against the `data/` cache, which is gitignored.
+
+## Fetch the data first
+
+A backtest reads bar history and the instrument list from the `data/` cache
+only — it never reaches the network. Populate the cache with `xsec fetch`:
+
+```sh
+make fetch                                # universe.txt
+make fetch UNIVERSE=coins/my_universe.txt
+```
+
+`xsec fetch` downloads the Bybit linear-instruments list and every universe
+symbol's full daily-bar history into `data/`, and writes `data/manifest.json`
+(what resolved to a Bybit perp, and each symbol's bar coverage). Re-run it to
+refresh; `FETCH_ARGS="--refresh"` forces a re-download of caches that are still
+fresh. Coins with no Bybit USDT perp are logged and skipped. A backtest against
+a missing cache stops with a pointer to run this first.
 
 ## End-to-end workflow
 
 ```sh
+make fetch                  # once — populate data/ from Bybit
 make tearsheet              # fresh run, generated UUID-7
 make tearsheet UUID=<id>    # pin / re-render a specific run id
 ```
@@ -38,8 +56,8 @@ prints `run_id=<UUID>` on stdout.
 ## Configuring a run
 
 A run picks its strategy with a subcommand. `cargo run --bin xsec -- --help`
-lists the strategies (there is one, `momentum`);
-`cargo run --bin xsec -- momentum --help` lists its knobs.
+lists the subcommands — `fetch` (see above) and the strategies (one strategy,
+`momentum`); `cargo run --bin xsec -- momentum --help` lists its knobs.
 
 **Shared flags:**
 

@@ -12,13 +12,16 @@ use nautilus_model::{
     data::Bar,
     enums::BarAggregation,
     identifiers::{InstrumentId, Symbol, Venue},
-    instruments::{CryptoPerpetual, InstrumentAny},
+    instruments::{CryptoPerpetual, Instrument, InstrumentAny},
     types::{Currency, Price, Quantity},
 };
 
 use xsec::{
     config::RunConfig,
-    data::exchange::{InMemoryMarketData, bybit::get_bar_type},
+    data::exchange::{
+        CachedMarketData, InMemoryMarketData, MarketData,
+        bybit::{self, get_bar_type},
+    },
     engine,
     strategy::momentum::{Momentum, config as momentum},
 };
@@ -133,4 +136,48 @@ fn build_backtest_engine_wires_a_fixture_market_without_network() {
         vec![Venue::from("BYBIT")],
         "the strategy's own venue is the one added to the engine",
     );
+}
+
+/// `CachedMarketData` reads back exactly what `xsec fetch` writes: the
+/// instruments snapshot (whose `Currency` fields decode through a strict
+/// registry lookup) and the per-symbol bar cache.
+#[test]
+fn cached_market_data_round_trips_a_fetched_universe() {
+    let dir = tempfile::tempdir().unwrap();
+    let id = InstrumentId::from("BTCUSDT-LINEAR.BYBIT");
+
+    bybit::write_instruments_snapshot(dir.path(), &[perp("BTC")]).unwrap();
+    bybit::write_bar_cache(dir.path(), &id, &daily_bars(id, 30)).unwrap();
+
+    let market = CachedMarketData::open(dir.path()).expect("cache dir opens");
+
+    let instruments = market.instruments().expect("instruments snapshot decodes");
+    assert_eq!(instruments.len(), 1);
+    assert_eq!(instruments[0].id(), id);
+
+    assert_eq!(market.bars(id, BarAggregation::Day).unwrap().len(), 30);
+}
+
+/// A symbol the fetch never ran for is a hard error, not an empty series — an
+/// empty series would let the backtest quietly run on a degenerate universe.
+#[test]
+fn cached_market_data_errors_on_an_uncached_symbol() {
+    let dir = tempfile::tempdir().unwrap();
+    bybit::write_instruments_snapshot(dir.path(), &[perp("BTC")]).unwrap();
+
+    let market = CachedMarketData::open(dir.path()).unwrap();
+    let err = market
+        .bars(InstrumentId::from("ETHUSDT-LINEAR.BYBIT"), BarAggregation::Day)
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("ETHUSDT-LINEAR.BYBIT"), "{err}");
+}
+
+/// Opening a cache that was never populated points at `xsec fetch`.
+#[test]
+fn cached_market_data_without_a_cache_points_at_xsec_fetch() {
+    let err = CachedMarketData::open("does/not/exist-xsec")
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("xsec fetch"), "{err}");
 }
