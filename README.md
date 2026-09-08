@@ -70,8 +70,8 @@ strategy's knobs: `momentum` (the `make` default) and
 | `--medium-days <n>`           | `3`   | medium-momentum lookback, in daily bars |
 | `--slow-days <n>`             | `7`   | slow-momentum lookback, in daily bars |
 | `--fast-weight <w>`           | `0.3` | weight on fast momentum in the composite score |
-| `--medium-weight <w>`         | `0.2` | weight on medium momentum in the composite score |
-| `--slow-weight <w>`           | `0.5` | weight on slow momentum in the composite score |
+| `--medium-weight <w>`         | `0.0` | weight on medium momentum in the composite score |
+| `--slow-weight <w>`           | `0.7` | weight on slow momentum in the composite score |
 | `--top-n <n>`                 | `5`   | number of names held long at a time |
 | `--regime-lookback-days <n>`  | `20`  | BTC trailing-return window for the regime filter |
 | `--risk-fraction <r>`         | `0.8` | gross exposure as a fraction of account equity, per rebalance (long-only, so this is net exposure too) |
