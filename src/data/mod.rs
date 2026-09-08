@@ -1,7 +1,8 @@
 //! Market data and per-run I/O.
 //!
-//! * [`exchange`] — the venue adapters that fetch and cache bar history and
-//!   instruments. Bybit ([`exchange::bybit`]) is the only venue today.
+//! * [`exchange`] — the [`MarketData`](exchange::MarketData) seam and its
+//!   adapters: Bybit ([`exchange::bybit`], the only venue today) and an
+//!   in-memory fake ([`exchange::InMemoryMarketData`]).
 //! * [`universe`] — the plain-text trading-universe file reader.
 //! * [`backtest`] — per-run artifact capture (`runs/<uuid>/{config,legs,
 //!   portfolio,fills}.csv`).
