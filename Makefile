@@ -1,18 +1,16 @@
 # End-to-end: run the backtest, then render its tearsheet.
 #
-#   make tearsheet                             # fresh run, generated UUID-7
-#   make tearsheet UUID=<id>                   # pin / re-render a specific run id
-#   make tearsheet ARGS="--lookback-months 6"  # pass extra flags to the strategy
-#   make tearsheet STRATEGY=momentum           # pick a strategy (this is the default)
-#   make tearsheet STRATEGY=top5-momentum-filtered ARGS="--top-n 3"
+#   make tearsheet                          # fresh run, generated UUID-7
+#   make tearsheet UUID=<id>                # pin / re-render a specific run id
+#   make tearsheet ARGS="--slow-days 14"    # pass extra flags to the strategy
+#   make tearsheet ARGS="--short-n 0 --regime-filter true"
 #
 # Everything for a run is keyed by $(UUID):
 #   logs/<UUID>/logs.log
 #   runs/<UUID>/{config,legs,portfolio,fills}.csv
 #   runs/<UUID>/{tearsheet,legs}.html
 #
-# See `cargo run --bin xsec -- --help` for the strategy list and
-# `cargo run --bin xsec -- $(STRATEGY) --help` for its knobs.
+# See `cargo run --bin xsec -- $(STRATEGY) --help` for the strategy's knobs.
 #
 #   make optimize                                  # Optuna search, 50 trials, defaults
 #   make optimize OPT_ARGS="--n-trials 200"         # see analysis/optimize.py --help
@@ -35,7 +33,7 @@ STRATEGY ?= momentum
 tearsheet: backtest report
 
 ## Run the backtest binary, tee-ing its output to logs/<UUID>/logs.log.
-## Extra flags: make backtest ARGS="--percentile 0.2 --long-w 0.7"
+## Extra flags: make backtest ARGS="--top-n 3 --short-n 3 --long-w 0.7"
 backtest:
 	@mkdir -p logs/$(UUID)
 	cargo run --bin xsec -- --uuid "$(UUID)" $(STRATEGY) $(ARGS) 2>&1 | tee logs/$(UUID)/logs.log

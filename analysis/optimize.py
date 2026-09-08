@@ -10,8 +10,8 @@ Each trial shells out to a release build of the `xsec` binary (same one
 
     target/release/xsec --uuid <trial-uuid> --universe <universe> \\
         --starting-balance <balance> --date-start <IS-start> --date-end <IS-end> \\
-        momentum --lookback-months .. --percentile .. --long-w .. \\
-        --signal-tilt .. --risk-pct ..
+        momentum --fast-days .. --slow-days .. --top-n .. --short-n .. \\
+        --long-w .. --allocation-tilt .. --risk-fraction ..
 
 so every trial's artifacts land under `runs/<trial-uuid>/` exactly like a
 normal `make backtest` run, and `analysis/tearsheet.py` /
@@ -20,11 +20,13 @@ deleted after a trial — a study's `runs/` directories are its full audit
 trail.
 
 The `--date-start`/`--date-end` window is split chronologically (70/30 by
-default, see `--split-ratio`), aligned to month boundaries since the strategy
-rebalances monthly: the first slice is in-sample and drives the Optuna
+default, see `--split-ratio`), the cut aligned to a month boundary for a
+stable, reproducible split: the first slice is in-sample and drives the Optuna
 objective (CAGR), the second is out-of-sample and is only ever touched once,
 after the study, to validate the best trial's params on data the search never
-saw. See `analysis/README.md`.
+saw. The objective annualises by the run's actual calendar span, so it is
+correct whatever `--holding-period` the search settles on. See
+`analysis/README.md`.
 """
 
 from __future__ import annotations
@@ -45,16 +47,27 @@ RUNS_DIR = REPO_ROOT / "runs"
 STUDIES_DIR = RUNS_DIR / "optuna"
 BINARY = REPO_ROOT / "target" / "release" / "xsec"
 
-# name -> (kind, low, high). Mirrors src/strategy/momentum/config.rs; a
-# `--holding-months` other than 1 isn't supported by the strategy today, so
-# it's left out of the search space.
+# name -> (kind, low, high). Mirrors the flags in src/strategy/momentum/config.rs.
+# Only the continuous signal / sizing knobs are searched; the composite-score
+# weights, the regime filter and the rebalance cadence stay at their CLI
+# defaults (fast/slow weights 0.3 / 0.7, --regime-filter off, --holding-period
+# day). A trial whose --top-n + --short-n exceeds the universe is pruned, not
+# fatal.
 SEARCH_SPACE: dict[str, tuple[str, float, float]] = {
-    "lookback_months": ("int", 1, 12),
-    "percentile": ("float", 0.05, 0.5),
+    "fast_days": ("int", 1, 5),
+    "slow_days": ("int", 5, 30),
+    "top_n": ("int", 2, 12),
+    "short_n": ("int", 0, 12),
     "long_w": ("float", 0.0, 1.0),
-    "signal_tilt": ("float", 0.0, 3.0),
-    "risk_pct": ("float", 0.1, 1.5),
+    "allocation_tilt": ("float", 0.0, 3.0),
+    "risk_fraction": ("float", 0.1, 1.5),
 }
+
+# The strategy's warm-up: it needs `max(fast_days, medium_days, slow_days,
+# regime_lookback_days) + 1` daily bars before it trades (see start_universe in
+# src/strategy/common.rs). With the search space above the binding term is
+# slow_days, so the longest warm-up any trial can ask for is:
+MAX_WARMUP_DAYS = int(SEARCH_SPACE["slow_days"][2]) + 1
 
 
 def _fail(message: str) -> "NoReturn":  # type: ignore[name-defined]
@@ -71,12 +84,12 @@ class BacktestFailed(RuntimeError):
 
 def split_is_oos(date_start: str, date_end: str, ratio: float = 0.7) -> tuple[str, str, str, str]:
     """Split ``[date_start, date_end]`` into a leading in-sample slice and a
-    trailing out-of-sample slice, aligned to month boundaries.
+    trailing out-of-sample slice, the cut aligned to a month boundary.
 
     Returns ``(is_start, is_end, oos_start, oos_end)`` as ``YYYY-MM-DD``
     strings. ``is_start`` is ``date_start`` and ``oos_end`` is ``date_end``
-    verbatim; the cut in between lands on a month boundary so it never splits
-    a rebalance month in two. Always leaves at least one month on each side.
+    verbatim; the cut in between lands on a month boundary so the split is
+    stable and reproducible. Always leaves at least one month on each side.
     """
     import pandas as pd
 
@@ -101,11 +114,11 @@ def split_is_oos(date_start: str, date_end: str, ratio: float = 0.7) -> tuple[st
     return date_start, is_end, oos_start, date_end
 
 
-def month_span(date_start: str, date_end: str) -> int:
-    """Number of calendar months spanned by `[date_start, date_end]`, inclusive."""
+def day_span(date_start: str, date_end: str) -> int:
+    """Number of calendar days between `date_start` and `date_end`, inclusive."""
     import pandas as pd
 
-    return len(pd.period_range(pd.Timestamp(date_start), pd.Timestamp(date_end), freq="M"))
+    return (pd.Timestamp(date_end) - pd.Timestamp(date_start)).days + 1
 
 
 # -- objective plumbing ------------------------------------------------------
@@ -113,17 +126,17 @@ def month_span(date_start: str, date_end: str) -> int:
 
 def suggest_params(trial: "optuna.Trial") -> dict[str, int | float]:
     """One draw from `SEARCH_SPACE`, keyed by the momentum strategy's flag names."""
-    return {
-        "lookback_months": trial.suggest_int("lookback_months", 1, 12),
-        "percentile": trial.suggest_float("percentile", 0.05, 0.5),
-        "long_w": trial.suggest_float("long_w", 0.0, 1.0),
-        "signal_tilt": trial.suggest_float("signal_tilt", 0.0, 3.0),
-        "risk_pct": trial.suggest_float("risk_pct", 0.1, 1.5),
-    }
+    out: dict[str, int | float] = {}
+    for name, (kind, low, high) in SEARCH_SPACE.items():
+        if kind == "int":
+            out[name] = trial.suggest_int(name, int(low), int(high))
+        else:
+            out[name] = trial.suggest_float(name, low, high)
+    return out
 
 
 def params_to_argv(params: dict[str, int | float]) -> list[str]:
-    """`{"lookback_months": 6, "percentile": 0.1, ...}` -> `["--lookback-months", "6", ...]`."""
+    """`{"fast_days": 3, "long_w": 0.5, ...}` -> `["--fast-days", "3", ...]`."""
     argv: list[str] = []
     for name, value in params.items():
         flag = "--" + name.replace("_", "-")
@@ -168,8 +181,8 @@ def run_backtest(
         raise BacktestFailed(detail or f"xsec exited {result.returncode}")
 
 
-def load_net_returns(uuid: str):
-    """The chronological `net_return` series from `runs/<uuid>/portfolio.csv`."""
+def load_portfolio(uuid: str):
+    """The `runs/<uuid>/portfolio.csv` rows, sorted chronologically by period."""
     import pandas as pd
 
     path = RUNS_DIR / uuid / "portfolio.csv"
@@ -177,25 +190,38 @@ def load_net_returns(uuid: str):
         raise BacktestFailed(f"no portfolio.csv for run {uuid}")
 
     frame = pd.read_csv(path)
-    if frame.empty or "net_return" not in frame.columns or "period" not in frame.columns:
-        raise BacktestFailed(f"portfolio.csv for run {uuid} is empty or missing period/net_return")
+    needed = {"net_return", "period", "period_end_date"}
+    if frame.empty or not needed.issubset(frame.columns):
+        raise BacktestFailed(
+            f"portfolio.csv for run {uuid} is empty or missing {sorted(needed)}"
+        )
+    return frame.sort_values("period").reset_index(drop=True)
 
-    frame = frame.sort_values("period")
-    return pd.Series(frame["net_return"].astype(float).values, name="net_return")
 
+def cagr(frame) -> float:
+    """Compound annual growth rate from a `portfolio.csv` frame.
 
-def cagr(returns) -> float:
-    """Compound annual growth rate of a monthly return series.
-
-    A total wipeout (or worse) floors at -1.0 rather than raising on a
-    fractional power of a non-positive number.
+    Compounds the per-period `net_return` series, then annualises by the run's
+    actual calendar span — the number of periods times their median spacing —
+    so the figure is correct whatever the rebalance cadence (daily, weekly,
+    monthly). A total wipeout (or worse) floors at -1.0.
     """
-    if returns.empty:
+    import pandas as pd
+
+    if frame.empty:
         raise ValueError("cagr: empty return series")
+
+    returns = frame["net_return"].astype(float)
     growth = float((1.0 + returns).prod())
     if growth <= 0.0:
         return -1.0
-    return growth ** (12.0 / len(returns)) - 1.0
+
+    dates = pd.to_datetime(frame["period_end_date"]).sort_values()
+    gaps = dates.diff().dropna()
+    median_gap_days = int(gaps.median().days) if not gaps.empty else 30
+    median_gap_days = max(median_gap_days, 1)
+    years = len(returns) * median_gap_days / 365.25
+    return growth ** (1.0 / years) - 1.0
 
 
 def make_objective(
@@ -227,14 +253,14 @@ def make_objective(
                 date_end=is_end,
                 strategy_argv=params_to_argv(params),
             )
-            returns = load_net_returns(uuid)
+            frame = load_portfolio(uuid)
         except BacktestFailed as exc:
             trial.set_user_attr("error", str(exc))
             raise optuna.TrialPruned(str(exc)) from exc
 
         trial.set_user_attr("run_uuid", uuid)
-        trial.set_user_attr("n_months", len(returns))
-        return cagr(returns)
+        trial.set_user_attr("n_periods", len(frame))
+        return cagr(frame)
 
     return objective
 
@@ -260,7 +286,7 @@ def validate_oos(
         date_end=oos_end,
         strategy_argv=params_to_argv(best_trial.params),
     )
-    return cagr(load_net_returns(uuid)), uuid
+    return cagr(load_portfolio(uuid)), uuid
 
 
 def write_summary(
@@ -358,15 +384,13 @@ def main(argv: list[str] | None = None) -> None:
     print(f"in-sample:     {is_start}..{is_end}")
     print(f"out-of-sample: {oos_start}..{oos_end}")
 
-    max_lookback = SEARCH_SPACE["lookback_months"][2]
-    if month_span(oos_start, oos_end) <= max_lookback:
+    if day_span(oos_start, oos_end) <= MAX_WARMUP_DAYS * 3:
         print(
-            f"warning: the out-of-sample window is only {month_span(oos_start, oos_end)} month(s) "
-            f"long, <= the search space's max lookback_months ({int(max_lookback)}). The strategy "
-            "needs lookback_months of bars to accumulate before it trades at all (see "
-            "start_universe's warm-up request in src/strategy/common.rs), so a best trial with a "
-            "long lookback can show 0% out-of-sample simply because it never got a chance to "
-            "trade — that's a too-short window, not evidence of overfitting. Widen "
+            f"warning: the out-of-sample window is only {day_span(oos_start, oos_end)} day(s) "
+            f"long. The strategy needs up to {MAX_WARMUP_DAYS} daily bars of warm-up before it "
+            "trades at all (see start_universe's warm-up request in src/strategy/common.rs), so a "
+            "very short window can show a flat 0% out-of-sample simply because the book barely got "
+            "going — that's a too-short window, not evidence of overfitting. Widen "
             "--date-start/--date-end or lower --split-ratio if you see that.",
             file=sys.stderr,
         )

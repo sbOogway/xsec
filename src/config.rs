@@ -60,7 +60,7 @@ pub struct CliArgs {
 #[derive(Clone, Debug)]
 pub struct RunConfig {
     pub run_id: String,
-    /// The strategy subcommand name (`cross_sectional_momentum`), recorded in
+    /// The strategy subcommand name (`momentum`), recorded in
     /// `config.csv` and used by `analysis/` to label a run.
     pub strategy: String,
     pub date_start: String,
@@ -150,9 +150,9 @@ mod tests {
     #[test]
     fn shared_defaults_are_stable() {
         let uni = universe_file(20);
-        let cfg = build_config(&cli(uni.path(), &[]), &[], "cross_sectional_momentum").unwrap();
+        let cfg = build_config(&cli(uni.path(), &[]), &[], "momentum").unwrap();
 
-        assert_eq!(cfg.strategy, "cross_sectional_momentum");
+        assert_eq!(cfg.strategy, "momentum");
         assert_eq!(cfg.starting_balance, "1_000 USDT");
         assert_eq!(cfg.date_start, "2020-01-01");
         assert_eq!(cfg.date_end, "2026-09-02");
@@ -167,7 +167,7 @@ mod tests {
         let cfg = build_config(
             &cli(uni.path(), &["--uuid", "run-42"]),
             &["xsectional-rs".into(), "--uuid".into(), "run-42".into()],
-            "cross_sectional_momentum",
+            "momentum",
         )
         .unwrap();
 
@@ -185,7 +185,7 @@ mod tests {
                 &["--date-start", "2025-01-01", "--date-end", "2024-01-01"],
             ),
             &[],
-            "cross_sectional_momentum",
+            "momentum",
         )
         .unwrap_err()
         .to_string();
@@ -198,7 +198,7 @@ mod tests {
         let err = build_config(
             &cli(uni.path(), &["--starting-balance", "1000 USDC"]),
             &[],
-            "cross_sectional_momentum",
+            "momentum",
         )
         .unwrap_err()
         .to_string();
@@ -210,7 +210,7 @@ mod tests {
         let err = build_config(
             &cli(std::path::Path::new("nope.txt"), &[]),
             &[],
-            "cross_sectional_momentum",
+            "momentum",
         )
         .unwrap_err()
         .to_string();

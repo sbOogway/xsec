@@ -1,34 +1,39 @@
-//! The cross-sectional momentum strategy: rank the universe by trailing return,
-//! go long the top `percentile` and short the bottom `percentile`, hold a
-//! month, repeat. Everything that is not the signal — the rebalance clock, the
-//! price buffers, artifact capture, notional-sized orders — comes from
-//! [`crate::strategy::common::StrategyRuntime`].
+//! The momentum strategy: rank the universe by a composite fast/medium/slow
+//! momentum score, hold the top `top_n` names long and the bottom `short_n`
+//! short. Every `--number-holding-periods` of the `--holding-period` clock unit
+//! it re-ranks and trades only the delta — closing names that left their slice,
+//! opening the ones that just entered (a name that flipped from the top slice
+//! to the bottom is closed and reopened on the other side), leaving the rest to
+//! ride. With `--regime-filter` on it also flattens the whole book to cash
+//! whenever BTC's trend regime is negative. Everything that is not the signal —
+//! the rebalance clock, the price buffers, artifact capture, notional-sized
+//! orders — comes from [`crate::strategy::common::StrategyRuntime`].
 
-use std::{collections::HashMap, fmt::Debug, str::FromStr};
+use std::{collections::HashMap, fmt::Debug};
 
 use nautilus_common::{actor::DataActor, timer::TimeEvent};
 use nautilus_model::{
     data::Bar,
     enums::OrderSide,
-    events::{OrderFilled, PositionOpened},
-    identifiers::{InstrumentId, StrategyId, Venue},
+    events::OrderFilled,
+    identifiers::{InstrumentId, StrategyId},
 };
 use nautilus_trading::{StrategyConfig, StrategyCore, nautilus_strategy};
 use rust_decimal::{Decimal, prelude::ToPrimitive};
 
 use crate::{
     config::RunConfig,
-    period::{RebalancePeriod, YearMonth},
+    period::{CalendarPeriod, RebalancePeriod},
     sizing::{self, Conviction},
-    strategy::common::{Market, RuntimeState, StrategyRuntime},
+    strategy::common::{Market, RuntimeState, StrategyRuntime, btc_instrument_id, n_day_return},
 };
 
 use super::config::{self, Config};
 
 #[derive(bon::Builder)]
-pub struct XSectionalMomentum {
+pub struct Momentum {
     #[builder(default = StrategyCore::new(StrategyConfig {
-         strategy_id: Some(StrategyId::from("X-SEC-MOM")),
+         strategy_id: Some(StrategyId::from("MOMENTUM-001")),
          order_id_tag: Some("001".to_string()),
          ..Default::default()
     }))]
@@ -37,77 +42,82 @@ pub struct XSectionalMomentum {
     /// Shared run configuration: universe, dates, starting balance, uuid.
     run: RunConfig,
 
-    /// This strategy's resolved knobs (lookback, percentile, risk, tilt).
+    /// This strategy's resolved knobs.
     config: Config,
 
     /// Signal-agnostic backtest state: universe ids, rebalance clock, rolling
     /// price buffers, capture handle. Filled in `on_start`.
     #[builder(skip)]
-    runtime: RuntimeState<YearMonth>,
+    runtime: RuntimeState<CalendarPeriod>,
 
-    /// Trailing return per instrument, recomputed each rebalance.
-    #[builder(default)]
-    returns: HashMap<InstrumentId, Decimal>,
+    /// `BTC`'s instrument id, resolved once in `on_start` — only when
+    /// `--regime-filter` is on.
+    #[builder(skip)]
+    btc_instrument: Option<InstrumentId>,
+
+    /// The names the strategy currently intends to hold and on which side — its
+    /// own book of record, kept in lock-step with `RunCapture`'s. It drives the
+    /// close/open diff at each turnover, rather than `cache().positions_open()`
+    /// (whose fills can lag a turnover and drop a name from the diff).
+    #[builder(skip)]
+    book: HashMap<InstrumentId, OrderSide>,
 }
 
-nautilus_strategy!(XSectionalMomentum, {
-    fn on_position_opened(&mut self, event: PositionOpened) {
-        log::info!("new position debug {:#?}", event);
-    }
-
+nautilus_strategy!(Momentum, {
     fn on_order_filled(&mut self, event: &OrderFilled) {
         self.record_fill(event);
     }
 });
 
-impl StrategyRuntime for XSectionalMomentum {
-    type Period = YearMonth;
+impl StrategyRuntime for Momentum {
+    type Period = CalendarPeriod;
 
-    fn runtime(&self) -> &RuntimeState<YearMonth> {
+    fn runtime(&self) -> &RuntimeState<CalendarPeriod> {
         &self.runtime
     }
-    fn runtime_mut(&mut self) -> &mut RuntimeState<YearMonth> {
+    fn runtime_mut(&mut self) -> &mut RuntimeState<CalendarPeriod> {
         &mut self.runtime
     }
     fn market(&self) -> Market {
         config::MARKET
     }
-    fn current_period(&self, ts_nanos: u64) -> YearMonth {
-        YearMonth::from_nanos(ts_nanos)
+    fn current_period(&self, ts_nanos: u64) -> CalendarPeriod {
+        self.config.holding_period.period_at(ts_nanos)
     }
 }
 
-impl Debug for XSectionalMomentum {
+impl Debug for Momentum {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("XSectionalMomentum")
+        f.debug_struct("Momentum")
             .field("run", &self.run)
             .field("config", &self.config)
             .field("core", &self.core)
             .field("instruments", &self.runtime.instruments)
+            .field("book", &self.book)
             .finish()
     }
 }
 
-impl DataActor for XSectionalMomentum {
+impl DataActor for Momentum {
     fn on_start(&mut self) -> anyhow::Result<()> {
         log::info!("run_id={}", self.run.run_id);
-
-        // Defense in depth: `config::build` already rejects this, but the
-        // rebalance path below assumes a one-month hold.
-        if self.config.holding_months != 1 {
-            return Err(anyhow::anyhow!(
-                "holding_months={} is not supported: the rebalance path assumes a one-month hold. \
-                 Revisit the age-based close in on_time_event before changing this.",
-                self.config.holding_months
-            ));
-        }
 
         let run = self.run.clone();
         let rows = config::config_rows(&self.config);
         self.open_capture(&run, &rows)?;
 
+        if self.config.regime_filter {
+            self.btc_instrument = Some(btc_instrument_id(&self.run.bases, config::VENUE));
+        }
+
         let instruments = config::instrument_ids(&self.run.bases);
-        let window = self.config.lookback_months as usize;
+        let window = self
+            .config
+            .fast_days
+            .max(self.config.medium_days)
+            .max(self.config.slow_days)
+            .max(self.config.regime_lookback_days) as usize
+            + 1;
         self.start_universe(instruments, window)?;
 
         log::info!("{:#?}", self);
@@ -121,8 +131,8 @@ impl DataActor for XSectionalMomentum {
     }
 
     fn on_stop(&mut self) -> anyhow::Result<()> {
-        log::info!("XSectionalMomentum stopped");
-        self.finish_capture();
+        log::info!("Momentum stopped");
+        self.finish_book_capture();
         anyhow::Ok(())
     }
 
@@ -131,89 +141,115 @@ impl DataActor for XSectionalMomentum {
             return anyhow::Ok(());
         };
 
-        // A J-month return needs J+1 daily... rather, monthly price points; the
-        // aging window mirrors that: 27 days approximates a month so the
-        // full book turns over once per rebalance (hold == rebalance period).
-        let holding_days = 27_u64 * self.config.holding_months as u64;
-        self.close_expired(event, holding_days);
+        let equity = self.usdt_equity();
 
-        // --- signal: trailing return over the formation window, per name ---
-        let lookback = self.config.lookback_months;
-        let instruments = self.runtime().instruments.clone();
-        let mut computed: Vec<(InstrumentId, Option<Decimal>)> =
-            Vec::with_capacity(instruments.len());
-        for instrument in &instruments {
-            let queue = self.runtime().prices.get(instrument);
-            let past = queue.and_then(|q| q.inner.front().copied());
-            let now = queue.and_then(|q| q.inner.get((lookback - 1) as usize).copied());
-            let ret = match (now, past) {
-                (Some(now), Some(past)) => Some((now - past) / past),
-                _ => None,
-            };
-            log::debug!("{instrument} return lookback -> {ret:?}");
-            computed.push((*instrument, ret));
-        }
-        for (instrument, ret) in computed {
-            match ret {
-                Some(ret) => {
-                    self.returns.insert(instrument, ret);
+        // --- regime filter (opt-in) ---
+        // Runs every period, whatever the rebalance cadence: the book flattens
+        // to cash — longs *and* shorts — the moment BTC's trend turns negative.
+        if self.config.regime_filter {
+            let btc = self
+                .btc_instrument
+                .expect("set in on_start when regime_filter is on");
+            let btc_return =
+                self.runtime().prices.get(&btc).and_then(|queue| {
+                    n_day_return(queue, self.config.regime_lookback_days as usize)
+                });
+            let regime_is_positive = btc_return.is_some_and(|r| r >= Decimal::ZERO);
+
+            if !regime_is_positive {
+                let closed: Vec<InstrumentId> = self.book.drain().map(|(id, _)| id).collect();
+                self.close_all();
+                let marks = self.runtime().latest_closes();
+                if let Some(capture) = self.runtime_mut().capture.as_mut() {
+                    capture.record_book_turnover(period, equity, &marks, &[], &closed);
                 }
-                None => {
-                    self.returns.remove(&instrument);
-                }
+                self.mark_rebalanced(period);
+                return anyhow::Ok(());
             }
         }
 
-        // --- rank and cut the top / bottom `percentile` ---
-        let returns_clone = self.returns.clone();
-        let mut sorted_returns: Vec<(&InstrumentId, &Decimal)> = returns_clone.iter().collect();
-        sorted_returns.sort_by_key(|&(_, v)| v);
-
-        let percentile_size = (Decimal::from_str(&self.config.percentile)
-            .expect("percentile validated in config::build")
-            * Decimal::from(sorted_returns.len()))
-        .as_i128() as usize;
-
-        let percentile_bottom = &sorted_returns[..percentile_size];
-        let percentile_top = &sorted_returns[sorted_returns.len() - percentile_size..];
-
-        log::info!("returns sorted {sorted_returns:#?}");
-        log::info!("returns bottom {percentile_bottom:#?}");
-        log::info!("returns top {percentile_top:#?}");
-
-        {
-            let account = self
-                .cache()
-                .account_for_venue(&Venue::new(config::VENUE))
-                .unwrap();
-            log::info!("balance {:#?}", account.balances());
+        // Re-rank and turn the book over only once per `number_holding_periods`
+        // clock units. Between turnovers the book rides untouched.
+        if let Some(last) = self.runtime().last_period {
+            let mut due = last;
+            for _ in 0..self.config.number_holding_periods {
+                due = due.next();
+            }
+            if period < due {
+                return anyhow::Ok(());
+            }
         }
 
-        let mut legs: Vec<(InstrumentId, OrderSide, Decimal, f64)> = Vec::new();
+        // --- signal: composite fast/medium/slow momentum score, per name ---
+        let instruments = self.runtime().instruments.clone();
+        let mut scores: Vec<(InstrumentId, f64)> = Vec::with_capacity(instruments.len());
+        for instrument in &instruments {
+            let Some(queue) = self.runtime().prices.get(instrument) else {
+                continue;
+            };
+            let fast = n_day_return(queue, self.config.fast_days as usize);
+            let medium = n_day_return(queue, self.config.medium_days as usize);
+            let slow = n_day_return(queue, self.config.slow_days as usize);
+            if let (Some(fast), Some(medium), Some(slow)) = (fast, medium, slow) {
+                let score = self.config.fast_weight * fast.to_f64().unwrap_or(0.0)
+                    + self.config.medium_weight * medium.to_f64().unwrap_or(0.0)
+                    + self.config.slow_weight * slow.to_f64().unwrap_or(0.0);
+                scores.push((*instrument, score));
+            }
+        }
 
-        // Gross budget for this rebalance, split between the two sides. Sizing is
-        // off the equity the account reports *now*, so the book compounds.
-        let equity = self.usdt_equity();
-        let budget = self.config.risk_pct * equity.to_f64().unwrap_or(0.0);
-        let (long_budget, short_budget) = sizing::split_sides(budget, self.config.long_w);
+        // --- rank: best score first ---
+        scores.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
 
-        let short_signals: Vec<(InstrumentId, f64)> = percentile_bottom
+        // Long the top `top_n`, short the bottom `short_n`. `config::build`
+        // gates `top_n + short_n` against the full universe; clamp here too so a
+        // still-warming-up scored set (fewer names) can never make the slices
+        // overlap.
+        let top_n = self.config.top_n.min(scores.len());
+        let short_n = self.config.short_n.min(scores.len().saturating_sub(top_n));
+
+        let long_signals: Vec<(InstrumentId, f64)> = scores[..top_n].to_vec();
+        let short_signals: Vec<(InstrumentId, f64)> = scores[scores.len() - short_n..].to_vec();
+
+        log::info!("rebalance: long {long_signals:#?} short {short_signals:#?}");
+
+        // Target book: the side we want each name on this turnover.
+        let mut target: HashMap<InstrumentId, OrderSide> = HashMap::new();
+        for (id, _) in &long_signals {
+            target.insert(*id, OrderSide::Buy);
+        }
+        for (id, _) in &short_signals {
+            target.insert(*id, OrderSide::Sell);
+        }
+
+        // Trade only the delta against the book of record. A held name is
+        // "dropped" when the target no longer wants it *on the side it is held*
+        // — which also covers a flip (top slice -> bottom slice): it is closed
+        // here and reopened on the other side below.
+        let dropped: Vec<InstrumentId> = self
+            .book
             .iter()
-            .map(|(i, r)| (**i, r.to_f64().unwrap_or(0.0)))
+            .filter(|(id, side)| target.get(id) != Some(side))
+            .map(|(id, _)| *id)
             .collect();
-        let long_signals: Vec<(InstrumentId, f64)> = percentile_top
-            .iter()
-            .map(|(i, r)| (**i, r.to_f64().unwrap_or(0.0)))
-            .collect();
+        self.close_positions(&dropped);
 
-        let tilt = self.config.signal_tilt;
-        let allocation = sizing::allocate(short_budget, &short_signals, tilt, Conviction::Low)
+        // Size a fresh full book off current equity. With no short side the long
+        // book takes the whole budget regardless of `long_w`.
+        let budget = self.config.risk_fraction * equity.to_f64().unwrap_or(0.0);
+        let (long_budget, short_budget) = if short_n == 0 {
+            (budget, 0.0)
+        } else {
+            sizing::split_sides(budget, self.config.long_w)
+        };
+        let tilt = self.config.allocation_tilt;
+        let allocation = sizing::allocate(long_budget, &long_signals, tilt, Conviction::High)
             .into_iter()
-            .map(|(id, n)| (id, OrderSide::Sell, n))
+            .map(|(id, n)| (id, OrderSide::Buy, n))
             .chain(
-                sizing::allocate(long_budget, &long_signals, tilt, Conviction::High)
+                sizing::allocate(short_budget, &short_signals, tilt, Conviction::Low)
                     .into_iter()
-                    .map(|(id, n)| (id, OrderSide::Buy, n)),
+                    .map(|(id, n)| (id, OrderSide::Sell, n)),
             )
             .collect::<Vec<_>>();
 
@@ -226,27 +262,42 @@ impl DataActor for XSectionalMomentum {
             period.label()
         );
 
+        // Submit orders only for names that just joined (or flipped side) — a
+        // same-side survivor keeps the size it was opened at.
+        let mut opened: Vec<(InstrumentId, OrderSide, Decimal, f64)> = Vec::new();
         for (instrument, side, notional) in allocation {
+            if self.book.get(&instrument) == Some(&side) {
+                continue; // same-side survivor — rides untouched
+            }
             if !self.submit_notional_market(instrument, side, notional) {
                 continue;
             }
-            // Entry mark: the close of the last monthly bar before this
-            // rebalance. Paired with the same instrument's close one rebalance
-            // later, this is a clean close-to-close holding-period return.
+            // Entry mark: the close of the last daily bar before this turnover.
+            // Marked forward at each subsequent turnover, the per-period moves
+            // telescope to a clean close-to-close hold return when the leg
+            // finally closes.
             if let Some(entry_price) = self
                 .runtime()
                 .prices
                 .get(&instrument)
                 .and_then(|q| q.inner.back().copied())
             {
-                legs.push((instrument, side, entry_price, notional));
+                opened.push((instrument, side, entry_price, notional));
             }
         }
 
-        let latest_close = self.runtime().latest_closes();
+        // Keep the book of record — and `RunCapture`'s — in lock-step with what
+        // was actually traded.
+        for instrument in &dropped {
+            self.book.remove(instrument);
+        }
+        for (instrument, side, ..) in &opened {
+            self.book.insert(*instrument, *side);
+        }
+
+        let marks = self.runtime().latest_closes();
         if let Some(capture) = self.runtime_mut().capture.as_mut() {
-            capture.record_rebalance(period, equity, legs);
-            capture.finalise_completed(period, &latest_close, equity);
+            capture.record_book_turnover(period, equity, &marks, &opened, &dropped);
         }
 
         self.mark_rebalanced(period);

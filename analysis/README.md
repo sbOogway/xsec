@@ -65,23 +65,28 @@ uv run --project analysis analysis/optimize.py --skip-build                   # 
 Builds `target/release/xsec` once (skip with `--skip-build` if it's already
 current), then splits `--date-start`/`--date-end` chronologically
 (`--split-ratio`, default `0.7`) into an in-sample slice and a trailing
-out-of-sample slice, aligned to month boundaries so the cut never falls inside
-a rebalance month. Each of `--n-trials` trials draws a `momentum` param set
+out-of-sample slice, the cut aligned to a month boundary for a stable,
+reproducible split. Each of `--n-trials` trials draws a `momentum` param set
 from an Optuna TPE sampler and runs a real `xsec momentum` backtest over the
 **in-sample** slice only:
 
 | param | range |
 | --- | --- |
-| `lookback_months` | int 1–12 |
-| `percentile` | float 0.05–0.5 |
+| `fast_days` | int 1–5 |
+| `slow_days` | int 5–30 |
+| `top_n` | int 2–12 |
+| `short_n` | int 0–12 |
 | `long_w` | float 0.0–1.0 |
-| `signal_tilt` | float 0.0–3.0 |
-| `risk_pct` | float 0.1–1.5 |
+| `allocation_tilt` | float 0.0–3.0 |
+| `risk_fraction` | float 0.1–1.5 |
 
-(`holding_months` stays fixed at the CLI default, `1` — the strategy doesn't
-support other values.) The objective is CAGR computed from the trial's
-`portfolio.csv` `net_return` series. A trial whose param combination makes
-`xsec` exit non-zero is pruned, not fatal to the study.
+(The composite-score weights, `--regime-filter` and `--holding-period` stay at
+their CLI defaults — fast/slow weights `0.3` / `0.7`, regime filter off,
+cadence `day`.) The objective is CAGR computed from the trial's
+`portfolio.csv` `net_return` series, annualised by the run's actual calendar
+span so it is correct whatever the cadence. A trial whose param combination
+makes `xsec` exit non-zero — e.g. `top_n + short_n` above the universe size —
+is pruned, not fatal to the study.
 
 Every trial's `runs/<uuid>/` is a normal backtest run — nothing is deleted —
 so `tearsheet.py --uuid <trial-uuid>` / `legs.py --uuid <trial-uuid>` work on
@@ -97,15 +102,14 @@ the same `--study-name` to add more trials to it), and a small summary —
 window dates, best params, both CAGRs, both run uuids — is written to
 `runs/optuna/<study-name>.json`.
 
-**Caveat:** the strategy needs `lookback_months` monthly bars to accumulate
-before it trades at all (the warm-up request in `start_universe`,
-`src/strategy/common.rs`). If the out-of-sample slice is shorter than the
-search space's longest `lookback_months` (12), a trial that picked a long
-lookback can show a flat 0% out-of-sample — it never got a chance to trade —
-which is a too-short window, not evidence of overfitting. `optimize.py` warns
-on stderr when this is possible; the default window (2020 → today) leaves
-plenty of margin, but a short `--date-start`/`--date-end` for a quick smoke
-test can trip it.
+**Caveat:** the strategy needs `max(fast_days, medium_days, slow_days,
+regime_lookback_days) + 1` daily bars of warm-up before it trades at all (the
+warm-up request in `start_universe`, `src/strategy/common.rs`). If the
+out-of-sample slice is only a few weeks long, the book barely gets going and a
+best trial can show a flat 0% out-of-sample — a too-short window, not evidence
+of overfitting. `optimize.py` warns on stderr when this is possible; the
+default window (2020 → today) leaves plenty of margin, but a short
+`--date-start`/`--date-end` for a quick smoke test can trip it.
 
 ## Inputs
 
@@ -130,22 +134,20 @@ close when it was closed. This is **price return only** — no funding-rate carr
 on the perpetual leg (a future feature).
 
 How long a leg lives — and how its PnL lands in `portfolio.csv` — depends on
-the strategy's capture flow (`src/capture.rs`):
+the strategy's capture flow (`src/capture.rs`). `momentum` uses the
+**carried book** flow: a name still in the target set (same side) at a re-rank
+rides on untouched, so a leg can span many periods and gets exactly one
+`legs.csv` row, written when it finally closes and covering the whole hold. A
+period's `gross_return` marks the *entire open book* close-to-close over that
+period (every held leg, not just fresh entries), and `n_long` / `n_short` is
+the book size. The per-period contributions of a multi-period leg sum to its
+`legs.csv` `per_leg_return`. (With `--number-holding-periods > 1` there is one
+row per re-rank, spanning that many periods.)
 
-- **Full turnover** (`momentum`) — the book is rebuilt from scratch every
-  rebalance, so every leg is opened and closed exactly one period apart.
-  `exit_price` is that instrument's close one rebalance later; a period's
-  `gross_return` sums the close-to-close PnL of the legs entered that period;
-  a portfolio row's `n_long` / `n_short` counts those entries.
-- **Carried book** (`top5-momentum-filtered`) — a name still in the target set
-  at a re-rank rides on untouched, so a leg can span many periods and gets
-  exactly one `legs.csv` row, written when it finally closes and covering the
-  whole hold. A period's `gross_return` marks the *entire open book*
-  close-to-close over that period (every held leg, not just fresh entries),
-  and `n_long` / `n_short` is the book size. The per-period contributions of a
-  multi-period leg sum to its `legs.csv` `per_leg_return`. (With
-  `--number-holding-periods > 1` there is one row per re-rank, spanning that
-  many periods.)
+The alternative **full turnover** flow — every leg opened and closed exactly
+one period apart, a period's PnL being just the legs entered that period — is
+still in `src/capture.rs` (and covered by `tests/capture_smoke.rs`) but no
+shipped strategy drives it today.
 
 `portfolio.gross_return` is an **account-level** per-rebalance-period return:
 the period's summed leg PnL — each leg's close-to-close move times its USDT

@@ -1,16 +1,16 @@
 # xsec
 
 Cross-sectional momentum backtests on [Nautilus Trader](https://nautilustrader.io/)
-over a basket of Bybit USDT-margined linear perpetuals. Two strategies:
+over a basket of Bybit USDT-margined linear perpetuals.
 
-- `momentum`: each month, long the top decile and short the bottom decile,
-  ranked by trailing return.
-- `top5-momentum-filtered`: long-only, top 5 names by a composite fast/medium/
-  slow momentum score, re-ranked on a configurable cadence (daily by default;
-  `--holding-period iso-week` / `month`). Each re-rank trades only the change —
-  drops the names that left the top 5, adds the ones that entered, holds the
-  rest untouched — and it sits out in cash whenever BTC's trend regime turns
-  negative.
+One strategy, `momentum`: rank the universe by a composite fast/medium/slow
+momentum score, hold the top `--top-n` names long and the bottom `--short-n`
+short (`--short-n 0` = long-only), re-ranked on a configurable cadence (daily by
+default; `--holding-period iso-week` / `month`). Each re-rank trades only the
+change — drops the names that left their slice, adds the ones that entered
+(flipping a name's side if it crossed from the top slice to the bottom), holds
+the rest untouched. With `--regime-filter` on it also flattens the whole book
+to cash whenever BTC's trend regime turns negative.
 
 Each run produces two per-run HTML reports alongside the log: a QuantStats
 **tearsheet** (portfolio performance) and a **per-leg diagnostics** page
@@ -38,11 +38,10 @@ prints `run_id=<UUID>` on stdout.
 ## Configuring a run
 
 A run picks its strategy with a subcommand. `cargo run --bin xsec -- --help`
-lists the strategies; `cargo run --bin xsec -- <strategy> --help` lists that
-strategy's knobs: `momentum` (the `make` default) and
-`top5-momentum-filtered`.
+lists the strategies (there is one, `momentum`);
+`cargo run --bin xsec -- momentum --help` lists its knobs.
 
-**Shared flags** (every strategy):
+**Shared flags:**
 
 | Flag | Default | What it does |
 | --- | --- | --- |
@@ -55,45 +54,33 @@ strategy's knobs: `momentum` (the `make` default) and
 
 | Flag | Default | What it does |
 | --- | --- | --- |
-| `--lookback-months <n>` | `3`   | trailing-return formation window |
-| `--percentile <p>`      | `0.1` | long/short cut as a fraction of the universe (`0.1` = deciles) |
-| `--risk-pct <r>`        | `0.8` | gross exposure as a fraction of account equity, per rebalance |
-| `--long-w <w>`          | `0.5` | share of the gross budget on the long side (`0.5` = dollar-neutral) |
-| `--signal-tilt <t>`     | `0.0` | within-side lean toward higher-conviction names (`0` = equal weight) |
-| `--holding-months <n>`  | `1`   | holding period; only `1` is supported today |
-
-**`top5-momentum-filtered` flags:**
-
-| Flag | Default | What it does |
-| --- | --- | --- |
 | `--fast-days <n>`             | `1`   | fast-momentum lookback, in daily bars |
 | `--medium-days <n>`           | `3`   | medium-momentum lookback, in daily bars |
 | `--slow-days <n>`             | `7`   | slow-momentum lookback, in daily bars |
 | `--fast-weight <w>`           | `0.3` | weight on fast momentum in the composite score |
 | `--medium-weight <w>`         | `0.0` | weight on medium momentum in the composite score |
 | `--slow-weight <w>`           | `0.7` | weight on slow momentum in the composite score |
-| `--top-n <n>`                 | `5`   | number of names held long at a time |
+| `--top-n <n>`                 | `5`   | number of names held long at a time (top of the score) |
+| `--short-n <n>`               | `5`   | number of names held short (bottom of the score); `0` = long-only |
+| `--long-w <w>`                | `0.5` | share of the gross budget on the long side (`0.5` = dollar-neutral); ignored when `--short-n 0` |
 | `--regime-lookback-days <n>`  | `20`  | BTC trailing-return window for the regime filter |
-| `--risk-fraction <r>`         | `0.8` | gross exposure as a fraction of account equity, per rebalance (long-only, so this is net exposure too) |
-| `--allocation-tilt <t>`       | `0.0` | within-book lean toward higher-conviction names (`0` = equal weight) |
+| `--regime-filter <bool>`      | `false` | flatten the whole book to cash on a negative BTC trend; needs `BTC` in the universe when on |
+| `--risk-fraction <r>`         | `0.8` | gross exposure as a fraction of account equity, per rebalance |
+| `--allocation-tilt <t>`       | `0.0` | within-side lean toward higher-conviction names (`0` = equal weight) |
 | `--holding-period <unit>`     | `day` | rebalance clock unit: `day`, `iso-week` or `month` |
-| `--number-holding-periods <n>`| `1`   | `--holding-period` units between re-ranks (each re-rank trades only the top-`n` delta; survivors ride) |
+| `--number-holding-periods <n>`| `1`   | `--holding-period` units between re-ranks (each re-rank trades only the top-/bottom-`n` delta; survivors ride) |
 
-The universe must include `BTC` (case-insensitive) — the regime filter reads
-its trailing return from the same buffer, no separate subscription.
+Invalid combinations are rejected before the engine boots (e.g. `--top-n` +
+`--short-n` larger than the universe, `--regime-filter true` with no `BTC` in
+the universe, all three score weights `0`, `--long-w` outside `[0, 1]`,
+`--date-start` after `--date-end`, a non-USDT balance). The resolved values —
+and the exact command line — are written to `runs/<UUID>/config.csv`.
 
-Invalid combinations are rejected before the engine boots (e.g. a `--percentile`
-outside `(0, 0.5]`, a universe too small for the requested cut, a `--top-n`
-larger than the universe, a universe missing `BTC`, `--date-start` after
-`--date-end`, a non-USDT balance). The resolved values — and the exact command
-line — are written to `runs/<UUID>/config.csv`.
-
-Through `make`, pass strategy flags with `ARGS` (and pick the strategy with
-`STRATEGY`):
+Through `make`, pass strategy flags with `ARGS`:
 
 ```sh
-make tearsheet ARGS="--lookback-months 6 --percentile 0.2"
-make tearsheet STRATEGY=top5-momentum-filtered ARGS="--top-n 3"
+make tearsheet ARGS="--slow-days 14 --top-n 3 --short-n 3"
+make tearsheet ARGS="--short-n 0 --regime-filter true"
 ```
 
 ### The universe file
