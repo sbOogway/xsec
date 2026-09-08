@@ -18,7 +18,7 @@ use nautilus_backtest::{
 use nautilus_live::node::LiveNode;
 
 use xsec::{
-    config::{self, CliArgs, RunConfig},
+    config::{self, RunConfig, SharedArgs},
     data::exchange::bybit as market_data,
     strategy::{
         StrategyKind,
@@ -27,9 +27,27 @@ use xsec::{
     },
 };
 
+/// Cross-sectional strategy backtests over Bybit USDT-margined linear
+/// perpetuals. Pick a strategy with a subcommand; `--help` on the subcommand
+/// lists its knobs. The coin universe is read from `--universe` (a plain-text
+/// file, one base asset per line).
+///
+/// The run-level flags live in [`SharedArgs`]; each strategy owns its own flags
+/// in `src/strategy/<name>/config.rs`. This struct just composes the two.
+#[derive(Parser, Debug)]
+#[command(name = env!("CARGO_PKG_NAME"), version, about, long_about = None)]
+struct CliArgs {
+    #[command(flatten)]
+    shared: SharedArgs,
+
+    /// The strategy to run.
+    #[command(subcommand)]
+    strategy: StrategyKind,
+}
+
 /// Which runtime to boot. The `Backtest` path is the one that is wired end to
 /// end; `Live` is a thin sketch and `Sandbox` is unimplemented. Everything else
-/// is configured per run through [`Cli`] and the chosen strategy's config.
+/// is configured per run through [`CliArgs`] and the chosen strategy's config.
 const ENVIRONMENT: Environment = Environment::Backtest;
 
 fn main() -> anyhow::Result<()> {
@@ -40,7 +58,7 @@ fn main() -> anyhow::Result<()> {
 
     match &cli.strategy {
         StrategyKind::Momentum(args) => {
-            let run = config::build_config(&cli, &argv, cli.strategy.name())?;
+            let run = config::build_config(&cli.shared, &argv, cli.strategy.name())?;
             let strategy_config = momentum::build(args, &run.bases)?;
             // Echoed on stdout so the caller can key `logs/<uuid>/logs.log` and
             // the `runs/<uuid>/` files to the same id.
