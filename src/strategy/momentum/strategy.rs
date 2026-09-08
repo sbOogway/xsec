@@ -242,7 +242,7 @@ impl DataActor for Momentum {
         let (long_budget, short_budget) = if short_n == 0 {
             (budget, 0.0)
         } else {
-            sizing::split_sides(budget, self.config.long_w)
+            sizing::split_sides(budget, self.config.long_short_balance)
         };
         let tilt = self.config.allocation_tilt;
         let allocation = sizing::allocate(long_budget, &long_signals, tilt, Conviction::High)

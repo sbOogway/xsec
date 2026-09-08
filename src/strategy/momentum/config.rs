@@ -65,7 +65,7 @@ pub struct Args {
     /// remainder. `0.5` = dollar-neutral. Only has an effect when
     /// `--short-n > 0`.
     #[arg(long, default_value_t = 0.5)]
-    pub long_w: f64,
+    pub long_short_balance: f64,
 
     /// BTC trailing-return window for the regime filter, in days.
     #[arg(long, default_value_t = 20)]
@@ -109,7 +109,7 @@ pub struct Config {
     pub top_n: usize,
     pub short_n: usize,
     /// Share of the gross budget on the long side (0.5 = dollar-neutral).
-    pub long_w: f64,
+    pub long_short_balance: f64,
     pub regime_lookback_days: u32,
     /// Flatten to cash on a negative BTC trend.
     pub regime_filter: bool,
@@ -165,9 +165,9 @@ pub fn build(args: &Args, bases: &[String]) -> Result<Config> {
     );
 
     ensure!(
-        (0.0..=1.0).contains(&args.long_w),
+        (0.0..=1.0).contains(&args.long_short_balance),
         "--long-w must be in [0.0, 1.0], got {}",
-        args.long_w
+        args.long_short_balance
     );
 
     ensure!(
@@ -206,7 +206,7 @@ pub fn build(args: &Args, bases: &[String]) -> Result<Config> {
         slow_weight: args.slow_weight,
         top_n: args.top_n,
         short_n: args.short_n,
-        long_w: args.long_w,
+        long_short_balance: args.long_short_balance,
         regime_lookback_days: args.regime_lookback_days,
         regime_filter: args.regime_filter,
         risk_fraction: args.risk_fraction,
@@ -228,7 +228,7 @@ pub fn config_rows(cfg: &Config) -> Vec<(String, String)> {
         ("slow_weight".to_string(), cfg.slow_weight.to_string()),
         ("top_n".to_string(), cfg.top_n.to_string()),
         ("short_n".to_string(), cfg.short_n.to_string()),
-        ("long_w".to_string(), cfg.long_w.to_string()),
+        ("long_short_balance".to_string(), cfg.long_short_balance.to_string()),
         (
             "regime_lookback_days".to_string(),
             cfg.regime_lookback_days.to_string(),
@@ -296,7 +296,7 @@ mod tests {
         assert_eq!(cfg.slow_weight, 0.7);
         assert_eq!(cfg.top_n, 5);
         assert_eq!(cfg.short_n, 5);
-        assert_eq!(cfg.long_w, 0.5);
+        assert_eq!(cfg.long_short_balance, 0.5);
         assert_eq!(cfg.regime_lookback_days, 20);
         assert!(!cfg.regime_filter);
         assert_eq!(cfg.risk_fraction, 0.8);
