@@ -18,7 +18,7 @@ use rust_decimal::Decimal;
 use tempfile::tempdir;
 
 use nautilus_model::{enums::OrderSide, identifiers::InstrumentId};
-use xsec::capture::{RunCapture, RunConfig};
+use xsec::data::backtest::{RunCapture, RunConfig};
 use xsec::period::{IsoWeek, YearMonth};
 
 // The schema downstream tooling depends on — pinned here as literals so a

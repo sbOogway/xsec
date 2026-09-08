@@ -1,6 +1,10 @@
 //! The cadence-agnostic "what rebalance period is this" abstraction shared by
-//! the strategy runtime's rebalance clock ([`crate::strategy::common`]) and
-//! the run-artifact capture layer ([`crate::capture`]).
+//! the strategy runtime's rebalance clock ([`crate::strategy::common`]) and the
+//! run-artifact capture layer ([`crate::data::backtest`]).
+//!
+//! It lives at the crate root — like [`crate::config`] — because both of those
+//! subsystems depend on it while it depends on neither: nesting it under either
+//! one would make `data` and `strategy` circularly reference each other.
 //!
 //! A period is whatever a strategy rebalances on — a single calendar day
 //! ([`CalendarDay`]), an ISO week ([`IsoWeek`]) or a calendar month
@@ -17,7 +21,7 @@
 use chrono::{DateTime, Datelike, NaiveDate, Utc, Weekday};
 
 /// A rebalance period: the unit a strategy's clock rolls over on, and the join
-/// key [`crate::capture::RunCapture`] groups legs and portfolio rows by.
+/// key [`crate::data::backtest::RunCapture`] groups legs and portfolio rows by.
 ///
 /// Implementors also carry an inherent `from_nanos(ts_event: u64) -> Self`
 /// bucketing constructor; it is not on the trait because [`CalendarPeriod`]

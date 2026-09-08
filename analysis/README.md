@@ -134,7 +134,7 @@ close when it was closed. This is **price return only** — no funding-rate carr
 on the perpetual leg (a future feature).
 
 How long a leg lives — and how its PnL lands in `portfolio.csv` — depends on
-the strategy's capture flow (`src/capture.rs`). `momentum` uses the
+the strategy's capture flow (`src/data/backtest.rs`). `momentum` uses the
 **carried book** flow: a name still in the target set (same side) at a re-rank
 rides on untouched, so a leg can span many periods and gets exactly one
 `legs.csv` row, written when it finally closes and covering the whole hold. A
@@ -146,7 +146,7 @@ row per re-rank, spanning that many periods.)
 
 The alternative **full turnover** flow — every leg opened and closed exactly
 one period apart, a period's PnL being just the legs entered that period — is
-still in `src/capture.rs` (and covered by `tests/capture_smoke.rs`) but no
+still in `src/data/backtest.rs` (and covered by `tests/capture_smoke.rs`) but no
 shipped strategy drives it today.
 
 `portfolio.gross_return` is an **account-level** per-rebalance-period return:
@@ -167,7 +167,7 @@ cross-check.
 label looks like `2026-03` (end date the month's last day), a weekly one's
 `2026-W12` (end date that ISO week's Sunday), a daily one's `2026-03-14` — all
 just implementations of the same `RebalancePeriod` trait (`src/period.rs`)
-driving `RunCapture` (`src/capture.rs`).
+driving `RunCapture` (`src/data/backtest.rs`).
 
 ## Tests
 
