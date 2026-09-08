@@ -1,0 +1,83 @@
+# Assets the ranking + listing scripts treat as off-universe for cross-sectional
+# momentum: fiat / crypto stablecoins, tokenized T-bill and RWA yield funds
+# (stablecoin-equivalents that rank high by market cap but barely trade), and the
+# common wrapped / liquid-staking derivatives (price-pinned to their underlying).
+#
+# One SYMBOL per line, upper-case; blank lines and '#' comments are ignored.
+#   - coingecko_top_ranking.sh / coinmarketcap_top_ranking.sh drop these (unless --all)
+#   - bybit_listing_check.sh --annotate comments them out instead of dropping them
+
+# --- stablecoins (USD) ---
+USDT
+USDC
+DAI
+BUSD
+TUSD
+USDD
+USDE
+FDUSD
+PYUSD
+GUSD
+USDP
+FRAX
+LUSD
+SUSD
+USDS
+USD1
+USDX
+USDG
+USDY
+USD0
+RLUSD
+CRVUSD
+
+# --- stablecoins (non-USD) & tokenized commodities ---
+EURT
+EURC
+EURS
+XAUT
+PAXG
+
+# --- tokenized T-bill / RWA yield funds ---
+BUIDL
+USYC
+OUSG
+USTB
+BENJI
+TBILL
+FIGR_HELOC
+SYRUPUSDC
+JAAA
+JTRSY
+
+# --- wrapped BTC ---
+WBTC
+CBBTC
+TBTC
+LBTC
+SOLVBTC
+BTCB
+
+# --- wrapped / liquid-staked ETH ---
+WETH
+STETH
+WSTETH
+WEETH
+RETH
+CBETH
+WBETH
+EZETH
+RSETH
+OSETH
+METH
+SFRXETH
+ANKRETH
+
+# --- wrapped / liquid-staked other ---
+WBNB
+WSOL
+JITOSOL
+MSOL
+BSOL
+JUPSOL
+WHYPE

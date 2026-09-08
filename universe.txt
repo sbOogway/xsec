@@ -1,1 +1,1 @@
-coins/bybit_top_2026-09-04T21:28:56UTC.txt
+coins/genesis_universe.txt

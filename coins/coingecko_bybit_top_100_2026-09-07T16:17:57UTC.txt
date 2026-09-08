@@ -1,0 +1,103 @@
+# CoinGecko top 100 by mcap as of 2026-09-07T16:17:57UTC;
+# stablecoins and names with no Bybit USDT perp are commented out.
+
+BTC
+ETH
+# USDT   # stablecoin / derivative
+BNB
+XRP
+# USDC   # stablecoin / derivative
+SOL
+TRX
+# FIGR_HELOC   # stablecoin / derivative
+ZEC
+HYPE
+DOGE
+# RAIN   # no Bybit USDT perp
+XMR
+# USDS   # stablecoin / derivative
+LINK
+# WBT   # no Bybit USDT perp
+# LEO   # no Bybit USDT perp
+ADA
+XLM
+BCH
+# DAI   # stablecoin / derivative
+# USDE   # stablecoin / derivative
+LTC
+# USD1   # stablecoin / derivative
+UNI
+CC
+GRAM
+HBAR
+AVAX
+SUI
+# USDG   # stablecoin / derivative
+SHIB1000
+NEAR
+# PYUSD   # stablecoin / derivative
+# BUIDL   # stablecoin / derivative
+CRO
+# XAUT   # stablecoin / derivative
+# USYC   # stablecoin / derivative
+# M   # no Bybit USDT perp
+TAO
+# RLUSD   # stablecoin / derivative
+OKB
+# USDY   # stablecoin / derivative
+ASTER
+MNT
+AAVE
+# PAXG   # stablecoin / derivative
+ONDO
+DOT
+WLFI
+MORPHO
+PUMPFUN
+ENA
+WLD
+ICP
+SKY
+# HTX   # no Bybit USDT perp
+1000PEPE
+# USDD   # stablecoin / derivative
+# BGB   # no Bybit USDT perp
+# USDGO   # no Bybit USDT perp
+# USDF   # no Bybit USDT perp
+# BFUSD   # no Bybit USDT perp
+# U   # no Bybit USDT perp
+ETC
+BTW
+# EURSAFO   # no Bybit USDT perp
+LIT
+ARB
+# PI   # no Bybit USDT perp
+POL
+KAS
+# BCAP   # no Bybit USDT perp
+# KCS   # no Bybit USDT perp
+# GT   # no Bybit USDT perp
+QNT
+# EUTBL   # no Bybit USDT perp
+JST
+ATOM
+ALGO
+DASH
+# VVV   # no Bybit USDT perp
+# NEXO   # no Bybit USDT perp
+JUP
+RENDER
+# JTRSY   # stablecoin / derivative
+# USTB   # stablecoin / derivative
+STABLE
+CAKE
+FIL
+# JAAA   # stablecoin / derivative
+# GHO   # no Bybit USDT perp
+# BDX   # no Bybit USDT perp
+TRUMP
+VET
+# XDC   # no Bybit USDT perp
+CRV
+FLR
+INJ

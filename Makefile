@@ -29,7 +29,7 @@ UUID := $(UUID)
 # (--uuid, --universe, --date-*, --starting-balance).
 STRATEGY ?= momentum
 
-.PHONY: tearsheet backtest report optimize snapshot_bybit_top
+.PHONY: tearsheet backtest report optimize snapshot_bybit_top snapshot_coingecko_top snapshot_coingecko_bybit_top
 
 ## Run the backtest and build the tearsheet for $(UUID).
 tearsheet: backtest report
@@ -50,5 +50,26 @@ report:
 optimize:
 	uv run --project analysis analysis/optimize.py $(OPT_ARGS)
 
+
+UNIVERSE_SIZE ?= 100
 snapshot_bybit_top:
-	./scripts/bybit_turnover_ranking.sh | tac | cut -d':' -f1 | rg 'USDT$$' | head -30 | sed 's/USDT//' > coins/bybit_top_$(shell date --utc +%Y-%m-%dT%H:%M:%S%Z).txt
+	./scripts/bybit_turnover_ranking.sh | tac | cut -d':' -f1 | rg 'USDT$$' | head -$(UNIVERSE_SIZE) | sed 's/USDT//' > coins/bybit_top_$(UNIVERSE_SIZE)_$(shell date --utc +%Y-%m-%dT%H:%M:%S%Z).txt
+
+## Snapshot the CoinGecko top $(UNIVERSE_SIZE) into coins/coingecko_top_<N>_<ts>.txt.
+## Ranked by market cap; override with CG_BY=volume.
+CG_BY ?= mcap
+snapshot_coingecko_top:
+	./scripts/coingecko_top_ranking.sh --by $(CG_BY) | tac | cut -d':' -f1 | head -$(UNIVERSE_SIZE) > coins/coingecko_top_$(UNIVERSE_SIZE)_$(shell date --utc +%Y-%m-%dT%H:%M:%S%Z).txt
+
+## The CoinGecko top $(UNIVERSE_SIZE) as a ready-to-use universe file at
+## coins/coingecko_bybit_top_<N>_<ts>.txt: tradeable names as their Bybit base
+## coin, stablecoins and names with no Bybit USDT perp commented out with the
+## reason. Fewer than N names are live (the commented ones still count toward N).
+snapshot_coingecko_bybit_top:
+	ts=$$(date --utc +%Y-%m-%dT%H:%M:%S%Z); { \
+	  echo "# CoinGecko top $(UNIVERSE_SIZE) by $(CG_BY) as of $$ts;"; \
+	  echo "# stablecoins and names with no Bybit USDT perp are commented out."; \
+	  echo; \
+	  ./scripts/coingecko_top_ranking.sh --all --by $(CG_BY) | tac | cut -d':' -f1 | head -$(UNIVERSE_SIZE) \
+	    | ./scripts/bybit_listing_check.sh --annotate; \
+	} > coins/coingecko_bybit_top_$(UNIVERSE_SIZE)_$$ts.txt
