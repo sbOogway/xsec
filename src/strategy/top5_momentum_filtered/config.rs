@@ -44,11 +44,11 @@ pub struct Args {
     pub fast_weight: f64,
 
     /// Weight on medium momentum in the composite score.
-    #[arg(long, default_value_t = 0.2)]
+    #[arg(long, default_value_t = 0.0)]
     pub medium_weight: f64,
 
     /// Weight on slow momentum in the composite score.
-    #[arg(long, default_value_t = 0.5)]
+    #[arg(long, default_value_t = 0.7)]
     pub slow_weight: f64,
 
     /// Number of names held long at a time.
@@ -251,8 +251,8 @@ mod tests {
         assert_eq!(cfg.medium_days, 3);
         assert_eq!(cfg.slow_days, 7);
         assert_eq!(cfg.fast_weight, 0.3);
-        assert_eq!(cfg.medium_weight, 0.2);
-        assert_eq!(cfg.slow_weight, 0.5);
+        assert_eq!(cfg.medium_weight, 0.0);
+        assert_eq!(cfg.slow_weight, 0.7);
         assert_eq!(cfg.top_n, 5);
         assert_eq!(cfg.regime_lookback_days, 20);
         assert_eq!(cfg.risk_fraction, 0.8);
