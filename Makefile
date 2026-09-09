@@ -34,7 +34,7 @@ STRATEGY ?= momentum
 UNIVERSE ?= universe.txt
 EXCHANGE ?= bybit
 
-.PHONY: fetch tearsheet backtest report optimize snapshot_bybit_top snapshot_coingecko_top snapshot_coingecko_bybit_top snapshot_cmc_history universe_cmc_union
+.PHONY: fetch tearsheet backtest report optimize snapshot_bybit_top snapshot_coingecko_top snapshot_coingecko_bybit_top snapshot_cmc_history universe_cmc_union cmc_resolution
 
 ## Download $(EXCHANGE) instruments + bar history for $(UNIVERSE) into
 ## data/$(EXCHANGE)/. Run once before `make backtest` / `make tearsheet`; re-run
@@ -107,7 +107,7 @@ snapshot_cmc_history:
 ## coins/cmc_union_<from>_<to>_<ts>.txt: tradeable names as their Bybit base
 ## coin, stablecoins and names with no Bybit USDT perp commented out with the
 ## reason. Scrapes any missing days first.
-universe_cmc_union: snapshot_cmc_history
+universe_cmc_union: snapshot_cmc_history cmc_resolution
 	ts=$$(date --utc +%Y-%m-%dT%H:%M:%S%Z); \
 	from=$$(echo "$(CMC_FROM)" | tr -d '-'); to=$$(echo "$(CMC_TO)" | tr -d '-'); \
 	{ \
@@ -122,3 +122,15 @@ universe_cmc_union: snapshot_cmc_history
 	    tail -n +2 "$$f" | cut -d, -f3 | tr -d '"'; \
 	  done | sort -u | ./scripts/bybit_listing_check.sh --annotate; \
 	} > coins/cmc_union_$(CMC_FROM)_$(CMC_TO)_$$ts.txt
+
+## Resolve every CMC symbol that has appeared in ANY coins/cmc/ snapshot (whole
+## history, not [CMC_FROM, CMC_TO]) to its Bybit base coin, at
+## coins/cmc_resolution.csv: "cmc_symbol,bybit_base,status" where status is
+## listed|stablecoin|unlisted. Committed; `momentum --source coinmarketcap`
+## reads it. Regenerate when Bybit lists new perps.
+cmc_resolution: snapshot_cmc_history
+	{ \
+	  echo "cmc_symbol,bybit_base,status"; \
+	  for f in coins/cmc/*.csv; do tail -n +2 "$$f" | cut -d, -f3 | tr -d '"'; done \
+	    | sort -u | ./scripts/bybit_listing_check.sh --map; \
+	} > coins/cmc_resolution.csv
