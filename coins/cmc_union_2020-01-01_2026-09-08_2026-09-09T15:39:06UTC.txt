@@ -1,0 +1,986 @@
+# CoinMarketCap historical top 200 union, 2020-01-01..2026-09-08 as of 2026-09-09T15:39:06UTC;
+# every base asset that appeared in any daily snapshot in range;
+# stablecoins and names with no Bybit USDT perp are commented out.
+
+0G
+10000SATS
+1INCH
+2Z
+# 999   # no Bybit USDT perp
+# A   # no Bybit USDT perp
+# AAC   # no Bybit USDT perp
+AAVE
+# AB   # no Bybit USDT perp
+# ABBC   # no Bybit USDT perp
+# ABT   # no Bybit USDT perp
+# ACA   # no Bybit USDT perp
+ACE
+ACH
+ACT
+ADA
+# ADK   # no Bybit USDT perp
+# ADX   # no Bybit USDT perp
+# AE   # no Bybit USDT perp
+# AERGO   # no Bybit USDT perp
+AERO
+AEVO
+# AGI   # no Bybit USDT perp
+# AGIX   # no Bybit USDT perp
+# AGRO   # no Bybit USDT perp
+# AGVC   # no Bybit USDT perp
+# AI   # no Bybit USDT perp
+# AI16Z   # no Bybit USDT perp
+# AIB   # no Bybit USDT perp
+# AION   # no Bybit USDT perp
+# AIOZ   # no Bybit USDT perp
+AIXBT
+# AKRO   # no Bybit USDT perp
+AKT
+ALGO
+ALICE
+# ALLO   # no Bybit USDT perp
+# ALPHA   # no Bybit USDT perp
+ALT
+# AMB   # no Bybit USDT perp
+# AMP   # no Bybit USDT perp
+# AMPL   # no Bybit USDT perp
+# ANC   # no Bybit USDT perp
+ANIME
+ANKR
+# ANT   # no Bybit USDT perp
+# AOA   # no Bybit USDT perp
+APE
+API3
+# APIX   # no Bybit USDT perp
+# APM   # no Bybit USDT perp
+# APPC   # no Bybit USDT perp
+APT
+AR
+# ARAW   # no Bybit USDT perp
+ARB
+# ARDR   # no Bybit USDT perp
+ARK
+ARKM
+ARPA
+# ASD   # no Bybit USDT perp
+ASTER
+ASTR
+ATH
+ATOM
+# ATT   # no Bybit USDT perp
+AUCTION
+# AUDIO   # no Bybit USDT perp
+# AURORA   # no Bybit USDT perp
+AVA
+AVAX
+# AVINOC   # no Bybit USDT perp
+# AVNT   # no Bybit USDT perp
+# AWE   # no Bybit USDT perp
+# AXEL   # no Bybit USDT perp
+AXL
+AXS
+# AZTEC   # no Bybit USDT perp
+# B   # no Bybit USDT perp
+B3
+BABY
+1000000BABYDOGE
+# BADGER   # no Bybit USDT perp
+# BAKE   # no Bybit USDT perp
+# BAL   # no Bybit USDT perp
+BANANAS31
+BAND
+BARD
+BAT
+# BAY   # no Bybit USDT perp
+# BAZT   # no Bybit USDT perp
+# BCD   # no Bybit USDT perp
+BCH
+# BCN   # no Bybit USDT perp
+# BCZERO   # no Bybit USDT perp
+# BDX   # no Bybit USDT perp
+BEAM
+# BEAT   # no Bybit USDT perp
+BEL
+BERA
+# BF   # no Bybit USDT perp
+# BFT   # no Bybit USDT perp
+# BGB   # no Bybit USDT perp
+# BHD   # no Bybit USDT perp
+# BHP   # no Bybit USDT perp
+# BHT   # no Bybit USDT perp
+BICO
+BIGTIME
+# BILL   # no Bybit USDT perp
+BIO
+# BIT   # no Bybit USDT perp
+# BIX   # no Bybit USDT perp
+BLAST
+# BLOK   # no Bybit USDT perp
+BLUR
+# BLZ   # no Bybit USDT perp
+# BNANA   # no Bybit USDT perp
+BNB
+# BNK   # no Bybit USDT perp
+BNT
+# BNX   # no Bybit USDT perp
+# BOA   # no Bybit USDT perp
+# BOBA   # no Bybit USDT perp
+BOME
+# BOND   # no Bybit USDT perp
+# BONE   # no Bybit USDT perp
+1000BONK
+# BORA   # no Bybit USDT perp
+# BOTX   # no Bybit USDT perp
+# BPC   # no Bybit USDT perp
+# BPS   # no Bybit USDT perp
+# BRC   # no Bybit USDT perp
+# BRD   # no Bybit USDT perp
+BRETT
+# BRG   # no Bybit USDT perp
+# BRISE   # no Bybit USDT perp
+# BRZE   # no Bybit USDT perp
+# BST   # no Bybit USDT perp
+BSV
+BTC
+# BTC2   # no Bybit USDT perp
+# BTCB   # stablecoin / derivative
+# BTCP   # no Bybit USDT perp
+# BTCST   # no Bybit USDT perp
+# BTG   # no Bybit USDT perp
+# BTM   # no Bybit USDT perp
+# BTMX   # no Bybit USDT perp
+# BTRS   # no Bybit USDT perp
+# BTRST   # no Bybit USDT perp
+# BTS   # no Bybit USDT perp
+1000BTT
+# BTTOLD   # no Bybit USDT perp
+# BTU   # no Bybit USDT perp
+# BUSD   # stablecoin / derivative
+# BXK   # no Bybit USDT perp
+# BZ   # no Bybit USDT perp
+# BZRX   # no Bybit USDT perp
+# BZT   # no Bybit USDT perp
+# C20   # no Bybit USDT perp
+C98
+CAKE
+# CAP   # no Bybit USDT perp
+# CASHCAT   # no Bybit USDT perp
+CATI
+# CBUCKS   # no Bybit USDT perp
+CC
+# CCA   # no Bybit USDT perp
+# CCC   # no Bybit USDT perp
+# CCXX   # no Bybit USDT perp
+# CEEK   # no Bybit USDT perp
+# CEL   # no Bybit USDT perp
+CELO
+# CELR   # no Bybit USDT perp
+# CENNZ   # no Bybit USDT perp
+CFG
+CFX
+CGPT
+# CHEEL   # no Bybit USDT perp
+# CHEEMS   # no Bybit USDT perp
+CHILLGUY
+CHIP
+CHR
+# CHSB   # no Bybit USDT perp
+CHZ
+# CIX100   # no Bybit USDT perp
+CKB
+# CMT   # no Bybit USDT perp
+# CND   # no Bybit USDT perp
+# CNNC   # no Bybit USDT perp
+# CNT   # no Bybit USDT perp
+# CNX   # no Bybit USDT perp
+# COCOS   # no Bybit USDT perp
+# COMBO   # no Bybit USDT perp
+COMP
+# COQ   # no Bybit USDT perp
+CORE
+# COS   # no Bybit USDT perp
+COTI
+# COV   # no Bybit USDT perp
+COW
+# CPS   # no Bybit USDT perp
+# CQT   # no Bybit USDT perp
+# CRE   # no Bybit USDT perp
+# CREAM   # no Bybit USDT perp
+# CRN   # no Bybit USDT perp
+CRO
+# CRPT   # no Bybit USDT perp
+CRV
+# CSC   # no Bybit USDT perp
+# CSPR   # no Bybit USDT perp
+CTC
+# CTK   # no Bybit USDT perp
+# CTSI   # no Bybit USDT perp
+# CTT   # no Bybit USDT perp
+# CTXC   # no Bybit USDT perp
+CVC
+# CVCC   # no Bybit USDT perp
+# CVN   # no Bybit USDT perp
+# CVP   # no Bybit USDT perp
+# CVT   # no Bybit USDT perp
+CVX
+# CWV   # no Bybit USDT perp
+CYBER
+# DAC   # no Bybit USDT perp
+# DAD   # no Bybit USDT perp
+# DAG   # no Bybit USDT perp
+# DAI   # stablecoin / derivative
+# DAO   # no Bybit USDT perp
+# DAPP   # no Bybit USDT perp
+# DAR   # no Bybit USDT perp
+DASH
+DATA
+# DCN   # no Bybit USDT perp
+# DCR   # no Bybit USDT perp
+DEEP
+# DENT   # no Bybit USDT perp
+# DERO   # no Bybit USDT perp
+# DESO   # no Bybit USDT perp
+# DEV   # no Bybit USDT perp
+# DEX   # no Bybit USDT perp
+DEXE
+# DFI   # no Bybit USDT perp
+# DGB   # no Bybit USDT perp
+# DGD   # no Bybit USDT perp
+# DGTX   # no Bybit USDT perp
+# DGX   # no Bybit USDT perp
+DIA
+# DIVI   # no Bybit USDT perp
+# DMCH   # no Bybit USDT perp
+# DMG   # no Bybit USDT perp
+# DMT   # no Bybit USDT perp
+# DNA   # no Bybit USDT perp
+# DNT   # no Bybit USDT perp
+# DOCK   # no Bybit USDT perp
+# DODO   # no Bybit USDT perp
+# DOG   # no Bybit USDT perp
+DOGE
+# DOGS   # no Bybit USDT perp
+# DOS   # no Bybit USDT perp
+DOT
+# DPT   # no Bybit USDT perp
+# DRG   # no Bybit USDT perp
+# DRGN   # no Bybit USDT perp
+DRIFT
+# DTR   # no Bybit USDT perp
+# DUSK   # no Bybit USDT perp
+# DVI   # no Bybit USDT perp
+# DX   # no Bybit USDT perp
+DYDX
+DYM
+# DYN   # no Bybit USDT perp
+# ECOREAL   # no Bybit USDT perp
+# EDC   # no Bybit USDT perp
+EDGE
+# EDLC   # no Bybit USDT perp
+# EDO   # no Bybit USDT perp
+# EDR   # no Bybit USDT perp
+EDU
+# EFI   # no Bybit USDT perp
+EGLD
+# EGR   # no Bybit USDT perp
+EIGEN
+# EKT   # no Bybit USDT perp
+# ELA   # no Bybit USDT perp
+# ELAMA   # no Bybit USDT perp
+# ELF   # no Bybit USDT perp
+# ELON   # no Bybit USDT perp
+# EMC2   # no Bybit USDT perp
+# EMRX   # no Bybit USDT perp
+ENA
+# ENG   # no Bybit USDT perp
+ENJ
+ENS
+# EON   # no Bybit USDT perp
+# EOS   # no Bybit USDT perp
+# EOSDAC   # no Bybit USDT perp
+# EPS   # no Bybit USDT perp
+ERA
+# ERC20   # no Bybit USDT perp
+# ERD   # no Bybit USDT perp
+# ERG   # no Bybit USDT perp
+# ESCE   # no Bybit USDT perp
+ESP
+ETC
+ETH
+# ETHDYDX   # no Bybit USDT perp
+ETHFI
+# ETHW   # no Bybit USDT perp
+# ETN   # no Bybit USDT perp
+# ETP   # no Bybit USDT perp
+EUL
+# EURC   # stablecoin / derivative
+# EURS   # stablecoin / derivative
+# EVER   # no Bybit USDT perp
+# EVN   # no Bybit USDT perp
+# EVR   # no Bybit USDT perp
+# EVX   # no Bybit USDT perp
+# EWT   # no Bybit USDT perp
+# EXE   # no Bybit USDT perp
+# FAB   # no Bybit USDT perp
+# FARM   # no Bybit USDT perp
+FARTCOIN
+# FCT   # no Bybit USDT perp
+# FDUSD   # stablecoin / derivative
+# FEI   # no Bybit USDT perp
+# FET   # no Bybit USDT perp
+FF
+FIDA
+FIL
+# FIO   # no Bybit USDT perp
+# FIRO   # no Bybit USDT perp
+# FIS   # no Bybit USDT perp
+# FLG   # no Bybit USDT perp
+# FLM   # no Bybit USDT perp
+1000FLOKI
+FLOW
+FLR
+FLUID
+FLUX
+# FNSA   # no Bybit USDT perp
+FOGO
+# FOLKS   # no Bybit USDT perp
+FORM
+# FRAX   # stablecoin / derivative
+# FRONT   # no Bybit USDT perp
+# FSN   # no Bybit USDT perp
+# FST   # no Bybit USDT perp
+# FTM   # no Bybit USDT perp
+# FTT   # no Bybit USDT perp
+# FUN   # no Bybit USDT perp
+# FX   # no Bybit USDT perp
+# FXC   # no Bybit USDT perp
+# FXS   # no Bybit USDT perp
+# G   # no Bybit USDT perp
+# GAL   # no Bybit USDT perp
+GALA
+# GAP   # no Bybit USDT perp
+GAS
+# GBYTE   # no Bybit USDT perp
+# GCR   # no Bybit USDT perp
+# GEN   # no Bybit USDT perp
+# GENIUS   # no Bybit USDT perp
+# GEOD   # no Bybit USDT perp
+# GF   # no Bybit USDT perp
+# GHST   # no Bybit USDT perp
+# GIGA   # no Bybit USDT perp
+# GLEEC   # no Bybit USDT perp
+GLM
+# GLMR   # no Bybit USDT perp
+GMT
+GMX
+# GNO   # no Bybit USDT perp
+# GNT   # no Bybit USDT perp
+# GNY   # no Bybit USDT perp
+# GO   # no Bybit USDT perp
+GOAT
+# GOMINING   # no Bybit USDT perp
+# GPS   # no Bybit USDT perp
+GRAM
+GRASS
+GRIFFAIN
+# GRIN   # no Bybit USDT perp
+# GRN   # no Bybit USDT perp
+# GRS   # no Bybit USDT perp
+GRT
+# GT   # no Bybit USDT perp
+# GTC   # no Bybit USDT perp
+# GTN   # no Bybit USDT perp
+# GTO   # no Bybit USDT perp
+# GUSD   # stablecoin / derivative
+# GVT   # no Bybit USDT perp
+# GWEI   # no Bybit USDT perp
+# GXC   # no Bybit USDT perp
+# H   # no Bybit USDT perp
+# HAKKA   # no Bybit USDT perp
+# HARD   # no Bybit USDT perp
+HBAR
+# HC   # no Bybit USDT perp
+# HEDG   # no Bybit USDT perp
+# HEX   # no Bybit USDT perp
+# HFT   # no Bybit USDT perp
+# HIFI   # no Bybit USDT perp
+# HIGH   # no Bybit USDT perp
+HIVE
+# HMR   # no Bybit USDT perp
+HMSTR
+# HNC   # no Bybit USDT perp
+# HNS   # no Bybit USDT perp
+HNT
+HOME
+# HOOK   # no Bybit USDT perp
+# HOT   # no Bybit USDT perp
+# HPB   # no Bybit USDT perp
+# HPT   # no Bybit USDT perp
+# HT   # no Bybit USDT perp
+# HTDF   # no Bybit USDT perp
+# HUSD   # no Bybit USDT perp
+# HXRO   # no Bybit USDT perp
+# HYN   # no Bybit USDT perp
+HYPE
+# ICH   # no Bybit USDT perp
+ICNT
+ICP
+ICX
+ID
+# IDEX   # no Bybit USDT perp
+# IGNIS   # no Bybit USDT perp
+# ILC   # no Bybit USDT perp
+ILV
+IMX
+# INB   # no Bybit USDT perp
+INJ
+# INNBCL   # no Bybit USDT perp
+# INO   # no Bybit USDT perp
+IO
+IOST
+IOTA
+IOTX
+# IP   # no Bybit USDT perp
+# IPX   # no Bybit USDT perp
+# IQ   # no Bybit USDT perp
+# IRIS   # no Bybit USDT perp
+# IRYS   # no Bybit USDT perp
+# ITC   # no Bybit USDT perp
+# IZE   # no Bybit USDT perp
+JASMY
+# JOE   # no Bybit USDT perp
+JST
+JTO
+# JUL   # no Bybit USDT perp
+JUP
+# JWL   # no Bybit USDT perp
+# KAI   # no Bybit USDT perp
+KAIA
+KAITO
+KAS
+KAVA
+# KBC   # no Bybit USDT perp
+# KCASH   # no Bybit USDT perp
+# KCS   # no Bybit USDT perp
+# KDA   # no Bybit USDT perp
+# KEEP   # no Bybit USDT perp
+# KEY   # no Bybit USDT perp
+# KICK   # no Bybit USDT perp
+# KIN   # no Bybit USDT perp
+KITE
+# KLAY   # no Bybit USDT perp
+# KMD   # no Bybit USDT perp
+KMNO
+KNC
+# KNCL   # no Bybit USDT perp
+# KP3R   # no Bybit USDT perp
+# KRT   # no Bybit USDT perp
+KSM
+# KTA   # no Bybit USDT perp
+# KWD   # no Bybit USDT perp
+LA
+# LAMB   # no Bybit USDT perp
+# LAYER   # no Bybit USDT perp
+# LBC   # no Bybit USDT perp
+# LCX   # no Bybit USDT perp
+LDO
+# LEND   # no Bybit USDT perp
+# LEO   # no Bybit USDT perp
+# LET   # no Bybit USDT perp
+# LINA   # no Bybit USDT perp
+LINEA
+LINK
+LIT
+# LN   # no Bybit USDT perp
+# LOC   # no Bybit USDT perp
+# LOCUS   # no Bybit USDT perp
+# LOKI   # no Bybit USDT perp
+# LOOKS   # no Bybit USDT perp
+# LOOM   # no Bybit USDT perp
+LPT
+LQTY
+LRC
+# LRG   # no Bybit USDT perp
+LSK
+# LST   # no Bybit USDT perp
+LTC
+# LTO   # no Bybit USDT perp
+# LUNA   # no Bybit USDT perp
+1000LUNC
+# LVX   # no Bybit USDT perp
+# M   # no Bybit USDT perp
+MAGIC
+# MAID   # no Bybit USDT perp
+MANA
+MANTA
+# MANTRA   # no Bybit USDT perp
+# MARO   # no Bybit USDT perp
+# MARSCOIN   # no Bybit USDT perp
+MASK
+# MASS   # no Bybit USDT perp
+POL
+MAV
+# MB   # no Bybit USDT perp
+# MBL   # no Bybit USDT perp
+# MBOX   # no Bybit USDT perp
+# MBX   # no Bybit USDT perp
+# MC   # no Bybit USDT perp
+# MCO   # no Bybit USDT perp
+# MDA   # no Bybit USDT perp
+# MDX   # no Bybit USDT perp
+ME
+# MED   # no Bybit USDT perp
+MEGA
+MELANIA
+MEME
+MERL
+MET
+# META   # no Bybit USDT perp
+METIS
+MEW
+# MEXC   # no Bybit USDT perp
+# MFT   # no Bybit USDT perp
+# MICRO   # no Bybit USDT perp
+# MIN   # no Bybit USDT perp
+MINA
+IOTA
+MIRA
+# MITH   # no Bybit USDT perp
+# MKR   # no Bybit USDT perp
+# MLK   # no Bybit USDT perp
+# MLN   # no Bybit USDT perp
+MNT
+# MOB   # no Bybit USDT perp
+# MOBI   # no Bybit USDT perp
+# MOBILE   # no Bybit USDT perp
+MOCA
+# MOF   # no Bybit USDT perp
+1000000MOG
+MON
+# MONA   # no Bybit USDT perp
+MOODENG
+MORPHO
+MOVE
+MOVR
+# MRPH   # no Bybit USDT perp
+MTL
+# MULTI   # no Bybit USDT perp
+# MVL   # no Bybit USDT perp
+# MWC   # no Bybit USDT perp
+# MX   # no Bybit USDT perp
+# MXC   # no Bybit USDT perp
+# MXM   # no Bybit USDT perp
+# MYX   # no Bybit USDT perp
+# NANO   # no Bybit USDT perp
+# NAS   # no Bybit USDT perp
+# NAV   # no Bybit USDT perp
+# NCT   # no Bybit USDT perp
+NEAR
+# NEBL   # no Bybit USDT perp
+# NEC   # no Bybit USDT perp
+# NEIRO   # no Bybit USDT perp
+NEO
+# NEST   # no Bybit USDT perp
+# NET   # no Bybit USDT perp
+# NEW   # no Bybit USDT perp
+10000NEX
+# NEXO   # no Bybit USDT perp
+# NFT   # no Bybit USDT perp
+NIGHT
+# NIM   # no Bybit USDT perp
+# NKN   # no Bybit USDT perp
+NMR
+# NOAH   # no Bybit USDT perp
+# NOIA   # no Bybit USDT perp
+NOT
+# NPXS   # no Bybit USDT perp
+# NRG   # no Bybit USDT perp
+# NTRN   # no Bybit USDT perp
+# NU   # no Bybit USDT perp
+# NULS   # no Bybit USDT perp
+# NVT   # no Bybit USDT perp
+# NXM   # no Bybit USDT perp
+NXPC
+# NXS   # no Bybit USDT perp
+# NXT   # no Bybit USDT perp
+# NYE   # no Bybit USDT perp
+# NYM   # no Bybit USDT perp
+# O   # no Bybit USDT perp
+# OAS   # no Bybit USDT perp
+# OAX   # no Bybit USDT perp
+# OCEAN   # no Bybit USDT perp
+# ODE   # no Bybit USDT perp
+OGN
+OKB
+# OKS   # no Bybit USDT perp
+# OM   # no Bybit USDT perp
+# OMG   # no Bybit USDT perp
+ONDO
+# ONE   # no Bybit USDT perp
+ONG
+ONT
+OP
+# OPEN   # no Bybit USDT perp
+# OPIUM   # no Bybit USDT perp
+# ORBS   # no Bybit USDT perp
+ORCA
+ORDI
+# ORN   # no Bybit USDT perp
+# OSMO   # no Bybit USDT perp
+# OST   # no Bybit USDT perp
+# OXEN   # no Bybit USDT perp
+# OXT   # no Bybit USDT perp
+# PAI   # no Bybit USDT perp
+# PAX   # no Bybit USDT perp
+# PAXG   # stablecoin / derivative
+# PAY   # no Bybit USDT perp
+# PCX   # no Bybit USDT perp
+PENDLE
+PENGU
+PEOPLE
+1000PEPE
+# PERP   # no Bybit USDT perp
+PHA
+# PHX   # no Bybit USDT perp
+# PI   # no Bybit USDT perp
+# PIEVERSE   # no Bybit USDT perp
+PIPPIN
+# PIVX   # no Bybit USDT perp
+PIXEL
+# PLA   # no Bybit USDT perp
+# PLC   # no Bybit USDT perp
+# PLF   # no Bybit USDT perp
+# PLU   # no Bybit USDT perp
+PLUME
+# PMA   # no Bybit USDT perp
+# PNK   # no Bybit USDT perp
+# PNT   # no Bybit USDT perp
+PNUT
+# POA   # no Bybit USDT perp
+POL
+# POLS   # no Bybit USDT perp
+# POLY   # no Bybit USDT perp
+POLYX
+# POND   # no Bybit USDT perp
+# PONKE   # no Bybit USDT perp
+PONS
+POPCAT
+PORTAL
+POWR
+# PPT   # no Bybit USDT perp
+# PRIME   # no Bybit USDT perp
+# PRO   # no Bybit USDT perp
+# PROM   # no Bybit USDT perp
+PROVE
+# PSG   # no Bybit USDT perp
+PUMPFUN
+PUNDIX
+# PYR   # no Bybit USDT perp
+PYTH
+# PYUSD   # stablecoin / derivative
+# PZM   # no Bybit USDT perp
+# QASH   # no Bybit USDT perp
+# QBIT   # no Bybit USDT perp
+# QC   # no Bybit USDT perp
+# QKC   # no Bybit USDT perp
+QNT
+# QQQ   # no Bybit USDT perp
+# QSP   # no Bybit USDT perp
+QTUM
+# R   # no Bybit USDT perp
+# RAD   # no Bybit USDT perp
+# RAVE   # no Bybit USDT perp
+# RAY   # no Bybit USDT perp
+# RBN   # no Bybit USDT perp
+# RCN   # no Bybit USDT perp
+# RDD   # no Bybit USDT perp
+# RDN   # no Bybit USDT perp
+# RDNT   # no Bybit USDT perp
+RE
+RED
+# REEF   # no Bybit USDT perp
+# REN   # no Bybit USDT perp
+# RENBTC   # no Bybit USDT perp
+RENDER
+# REP   # no Bybit USDT perp
+# REPV2   # no Bybit USDT perp
+# REQ   # no Bybit USDT perp
+# REV   # no Bybit USDT perp
+# REW   # no Bybit USDT perp
+# RFOX   # no Bybit USDT perp
+# RFR   # no Bybit USDT perp
+# RGT   # no Bybit USDT perp
+# RIF   # no Bybit USDT perp
+# RING   # no Bybit USDT perp
+# RIO   # no Bybit USDT perp
+RIVER
+RLC
+# RLUSD   # stablecoin / derivative
+# RLY   # no Bybit USDT perp
+# RNDR   # no Bybit USDT perp
+ROBO
+# RON   # no Bybit USDT perp
+ROSE
+RPL
+RSR
+# RSS3   # no Bybit USDT perp
+RUNE
+RVN
+# S   # no Bybit USDT perp
+# S4F   # no Bybit USDT perp
+SAFE
+SAGA
+SAHARA
+# SAI   # no Bybit USDT perp
+# SAL   # no Bybit USDT perp
+# SALT   # no Bybit USDT perp
+SAND
+10000SATS
+# SBD   # no Bybit USDT perp
+# SC   # no Bybit USDT perp
+# SCC   # no Bybit USDT perp
+# SCR   # no Bybit USDT perp
+# SCRT   # no Bybit USDT perp
+# SEELE   # no Bybit USDT perp
+SEI
+SENT
+# SERO   # no Bybit USDT perp
+# SFI   # no Bybit USDT perp
+# SFP   # no Bybit USDT perp
+# SFUND   # no Bybit USDT perp
+SHIB1000
+# SHR   # no Bybit USDT perp
+SIGN
+# SIREN   # no Bybit USDT perp
+SKL
+SKR
+SKY
+# SKYAI   # no Bybit USDT perp
+SLP
+# SLV   # no Bybit USDT perp
+# SNB   # no Bybit USDT perp
+# SNEK   # no Bybit USDT perp
+# SNM   # no Bybit USDT perp
+SNT
+SNX
+SOL
+# SOLO   # no Bybit USDT perp
+# SOLVE   # no Bybit USDT perp
+SOMI
+SOON
+# SOS   # no Bybit USDT perp
+# SOUL   # no Bybit USDT perp
+# SPC   # no Bybit USDT perp
+# SPELL   # no Bybit USDT perp
+SPK
+# SPND   # no Bybit USDT perp
+SPX
+# SRM   # no Bybit USDT perp
+# SRN   # no Bybit USDT perp
+SSV
+STABLE
+# STAKE   # no Bybit USDT perp
+STEEM
+# STETH   # stablecoin / derivative
+STG
+# STMX   # no Bybit USDT perp
+# STO   # no Bybit USDT perp
+STORJ
+# STORM   # no Bybit USDT perp
+# STP   # no Bybit USDT perp
+# STPT   # no Bybit USDT perp
+# STRAT   # no Bybit USDT perp
+# STRAX   # no Bybit USDT perp
+# STREAM   # no Bybit USDT perp
+STRK
+STX
+SUI
+SUN
+# SUN-OLD   # no Bybit USDT perp
+SUPER
+# SURE   # no Bybit USDT perp
+# SUSD   # stablecoin / derivative
+SUSHI
+# SWAP   # no Bybit USDT perp
+# SWFTC   # no Bybit USDT perp
+# SWTH   # no Bybit USDT perp
+# SXP   # no Bybit USDT perp
+# SYN   # no Bybit USDT perp
+SYRUP
+# SYS   # no Bybit USDT perp
+# T   # no Bybit USDT perp
+# TAG   # no Bybit USDT perp
+# TAGZ5   # no Bybit USDT perp
+TAO
+# TCT   # no Bybit USDT perp
+# TEL   # no Bybit USDT perp
+# TFUEL   # no Bybit USDT perp
+THETA
+# THR   # no Bybit USDT perp
+# THX   # no Bybit USDT perp
+TIA
+# TIME   # no Bybit USDT perp
+# TKO   # no Bybit USDT perp
+# TMTG   # no Bybit USDT perp
+# TNB   # no Bybit USDT perp
+# TNC   # no Bybit USDT perp
+# TNT   # no Bybit USDT perp
+# TOMI   # no Bybit USDT perp
+# TOMO   # no Bybit USDT perp
+# TON   # no Bybit USDT perp
+1000TOSHI
+# TRAC   # no Bybit USDT perp
+TRB
+# TRIBE   # no Bybit USDT perp
+# TROY   # no Bybit USDT perp
+# TRU   # no Bybit USDT perp
+# TRUE   # no Bybit USDT perp
+TRUMP
+TRX
+# TSHP   # no Bybit USDT perp
+# TT   # no Bybit USDT perp
+# TTT   # no Bybit USDT perp
+1000TURBO
+# TUSD   # stablecoin / derivative
+TWT
+# U   # no Bybit USDT perp
+# UBT   # no Bybit USDT perp
+UMA
+# UNFI   # no Bybit USDT perp
+UNI
+# UNIBOT   # no Bybit USDT perp
+# UOS   # no Bybit USDT perp
+# UPP   # no Bybit USDT perp
+# UQC   # no Bybit USDT perp
+# USD1   # stablecoin / derivative
+# USDC   # stablecoin / derivative
+# USDD   # stablecoin / derivative
+# USDE   # stablecoin / derivative
+# USDG   # stablecoin / derivative
+# USDK   # no Bybit USDT perp
+# USDN   # no Bybit USDT perp
+# USDP   # stablecoin / derivative
+# USDT   # stablecoin / derivative
+# USELESS   # no Bybit USDT perp
+# UST   # no Bybit USDT perp
+USTC
+USUAL
+# UTK   # no Bybit USDT perp
+# UXLINK   # no Bybit USDT perp
+# VAI   # no Bybit USDT perp
+VANA
+# VANRY   # no Bybit USDT perp
+VELO
+# VELVET   # no Bybit USDT perp
+# VERI   # no Bybit USDT perp
+# VEST   # no Bybit USDT perp
+VET
+# VGX   # no Bybit USDT perp
+# VIC   # no Bybit USDT perp
+# VIDT   # no Bybit USDT perp
+# VINE   # no Bybit USDT perp
+VIRTUAL
+# VITAE   # no Bybit USDT perp
+# VLX   # no Bybit USDT perp
+# VRA   # no Bybit USDT perp
+# VSN   # no Bybit USDT perp
+# VSYS   # no Bybit USDT perp
+# VTC   # no Bybit USDT perp
+# VTHO   # no Bybit USDT perp
+# VVV   # no Bybit USDT perp
+# W   # no Bybit USDT perp
+# WABI   # no Bybit USDT perp
+WAL
+# WAN   # no Bybit USDT perp
+# WASTR   # no Bybit USDT perp
+WAVES
+WAXP
+# WBTC   # stablecoin / derivative
+# WCC   # no Bybit USDT perp
+WCT
+# WEMIX   # no Bybit USDT perp
+# WHBAR   # no Bybit USDT perp
+# WICC   # no Bybit USDT perp
+WIF
+# WILD   # no Bybit USDT perp
+# WIN   # no Bybit USDT perp
+# WKAVA   # no Bybit USDT perp
+WLD
+WLFI
+# WNXM   # no Bybit USDT perp
+WOO
+# WPR   # no Bybit USDT perp
+# WRX   # no Bybit USDT perp
+# WTC   # no Bybit USDT perp
+# WTHETA   # no Bybit USDT perp
+# WTRX   # no Bybit USDT perp
+# WXT   # no Bybit USDT perp
+# XAC   # no Bybit USDT perp
+XAI
+XAN
+# XAUT   # stablecoin / derivative
+# XCH   # no Bybit USDT perp
+XCN
+# XDB   # no Bybit USDT perp
+# XDC   # no Bybit USDT perp
+# XDCE   # no Bybit USDT perp
+1000XEC
+# XEM   # no Bybit USDT perp
+# XET   # no Bybit USDT perp
+# XHV   # no Bybit USDT perp
+# XIN   # no Bybit USDT perp
+XLM
+# XLT   # no Bybit USDT perp
+XMR
+# XMX   # no Bybit USDT perp
+# XNC   # no Bybit USDT perp
+# XNO   # no Bybit USDT perp
+# XNS   # no Bybit USDT perp
+# XOR   # no Bybit USDT perp
+XPL
+# XPR   # no Bybit USDT perp
+# XPRT   # no Bybit USDT perp
+# XRD   # no Bybit USDT perp
+XRP
+# XSN   # no Bybit USDT perp
+# XSR   # no Bybit USDT perp
+# XT   # no Bybit USDT perp
+# XTN   # no Bybit USDT perp
+# XTP   # no Bybit USDT perp
+XTZ
+XVG
+XVS
+# XWC   # no Bybit USDT perp
+# XYM   # no Bybit USDT perp
+# XYO   # no Bybit USDT perp
+# XZC   # no Bybit USDT perp
+# YAP   # no Bybit USDT perp
+YFI
+# YFII   # no Bybit USDT perp
+# YFL   # no Bybit USDT perp
+# YFV   # no Bybit USDT perp
+YGG
+# YOU   # no Bybit USDT perp
+# YZY   # no Bybit USDT perp
+ZAMA
+# ZAP   # no Bybit USDT perp
+# ZB   # no Bybit USDT perp
+ZBCN
+# ZBU   # no Bybit USDT perp
+# ZCN   # no Bybit USDT perp
+ZEC
+ZEN
+# ZEON   # no Bybit USDT perp
+ZEREBRO
+ZETA
+ZIL
+ZK
+# ZKJ   # no Bybit USDT perp
+# ZKS   # no Bybit USDT perp
+# ZLW   # no Bybit USDT perp
+ZORA
+ZRO
+ZRX
+# ZT   # no Bybit USDT perp
+# ZVC   # no Bybit USDT perp
+# 币安人生   # no Bybit USDT perp
