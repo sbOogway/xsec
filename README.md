@@ -77,28 +77,28 @@ lists the subcommands — `fetch` (see above) and the strategies (one strategy,
 
 | Flag | Default | What it does |
 | --- | --- | --- |
-| `--fast-days <n>`             | `1`   | fast-momentum lookback, in daily bars |
-| `--medium-days <n>`           | `3`   | medium-momentum lookback, in daily bars |
-| `--slow-days <n>`             | `7`   | slow-momentum lookback, in daily bars |
+| `--fast-days <n>`             | `7`   | fast-momentum lookback, in daily bars |
+| `--medium-days <n>`           | `30`  | medium-momentum lookback, in daily bars |
+| `--slow-days <n>`             | `30`  | slow-momentum lookback, in daily bars |
 | `--fast-weight <w>`           | `0.3` | weight on fast momentum in the composite score |
 | `--medium-weight <w>`         | `0.0` | weight on medium momentum in the composite score |
 | `--slow-weight <w>`           | `0.7` | weight on slow momentum in the composite score |
 | `--top-n <n>`                 | `5`   | number of names held long at a time (top of the score) |
 | `--short-n <n>`               | `5`   | number of names held short (bottom of the score); `0` = long-only |
-| `--long-w <w>`                | `0.5` | share of the gross budget on the long side (`0.5` = dollar-neutral); ignored when `--short-n 0` |
-| `--regime-lookback-days <n>`  | `20`  | BTC trailing-return window for the regime filter |
+| `--long-short-balance <w>`    | `0.5` | share of the gross budget on the long side (`0.5` = dollar-neutral); ignored when `--short-n 0` |
+| `--regime-lookback-days <n>`  | `30`  | BTC trailing-return window for the regime filter |
 | `--regime-filter <bool>`      | `false` | flatten the whole book to cash on a negative BTC trend; needs `BTC` in the universe when on |
-| `--risk-fraction <r>`         | `0.8` | gross exposure as a fraction of account equity, per rebalance |
+| `--risk-fraction <r>`         | `1.0` | gross exposure as a fraction of account equity, per rebalance |
 | `--allocation-tilt <t>`       | `0.0` | within-side lean toward higher-conviction names (`0` = equal weight) |
 | `--holding-period <unit>`     | `day` | rebalance clock unit: `day`, `iso-week` or `month` |
-| `--number-holding-periods <n>`| `1`   | `--holding-period` units between re-ranks (each re-rank trades only the top-/bottom-`n` delta; survivors ride) |
+| `--number-holding-periods <n>`| `7`   | `--holding-period` units between re-ranks (each re-rank trades only the top-/bottom-`n` delta; survivors ride) |
 | `--source <src>`              | `bybit` | `bybit` ranks the fixed `--universe`; `coinmarketcap` gates the eligible-to-hold set each rebalance by CoinMarketCap's historical top-N by market cap as of that date (see below) |
 | `--cmc-snapshots <dir>`       | `coins/cmc` | `[--source coinmarketcap]` the snapshot directory |
 | `--cmc-top-n <n>`             | `200` | `[--source coinmarketcap]` snapshot depth that counts as "in the top-N" (`200` = the whole snapshot); must be ≥ `--top-n + --short-n` |
 
 Invalid combinations are rejected before the engine boots (e.g. `--top-n` +
 `--short-n` larger than the universe, `--regime-filter true` with no `BTC` in
-the universe, all three score weights `0`, `--long-w` outside `[0, 1]`,
+the universe, all three score weights `0`, `--long-short-balance` outside `[0, 1]`,
 `--date-start` after `--date-end`, a non-USDT balance, `--cmc-top-n` below
 `--top-n + --short-n`). The resolved values — and the exact command line — are
 written to `runs/<UUID>/config.csv`.

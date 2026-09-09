@@ -59,7 +59,7 @@ pub struct Args {
     pub fast_days: u32,
 
     /// Medium-momentum lookback, in daily bars.
-    #[arg(long, default_value_t = 3)]
+    #[arg(long, default_value_t = 30)]
     pub medium_days: u32,
 
     /// Slow-momentum lookback, in daily bars.
@@ -101,11 +101,11 @@ pub struct Args {
     /// Flatten the whole book to cash whenever BTC's trailing return over
     /// `--regime-lookback-days` is negative. Off by default; when on, the
     /// universe must contain `BTC`.
-    #[arg(long, action = clap::ArgAction::Set, default_value_t = true)]
+    #[arg(long, action = clap::ArgAction::Set, default_value_t = false)]
     pub regime_filter: bool,
 
     /// Gross exposure as a fraction of account equity, per rebalance.
-    #[arg(long, default_value_t = 0.8)]
+    #[arg(long, default_value_t = 1.0)]
     pub risk_fraction: f64,
 
     /// Within-side tilt toward higher-conviction names. `0.0` = equal dollars
@@ -368,7 +368,7 @@ mod tests {
     fn defaults_are_stable() {
         let cfg = build(&args(&[]), &bases(20)).unwrap();
         assert_eq!(cfg.fast_days, 7);
-        assert_eq!(cfg.medium_days, 3);
+        assert_eq!(cfg.medium_days, 30);
         assert_eq!(cfg.slow_days, 30);
         assert_eq!(cfg.fast_weight, 0.3);
         assert_eq!(cfg.medium_weight, 0.0);
@@ -377,8 +377,8 @@ mod tests {
         assert_eq!(cfg.short_n, 5);
         assert_eq!(cfg.long_short_balance, 0.5);
         assert_eq!(cfg.regime_lookback_days, 30);
-        assert!(cfg.regime_filter);
-        assert_eq!(cfg.risk_fraction, 0.8);
+        assert!(!cfg.regime_filter);
+        assert_eq!(cfg.risk_fraction, 1.0);
         assert_eq!(cfg.allocation_tilt, 0.0);
         assert_eq!(cfg.holding_period, HoldingPeriod::Day);
         assert_eq!(cfg.number_holding_periods, 7);
