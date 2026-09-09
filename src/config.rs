@@ -77,14 +77,27 @@ pub struct RunConfig {
     pub argv: String,
 }
 
-/// Validate the [`SharedArgs`] and resolve them into a [`RunConfig`].
-/// Strategy-specific flags are validated separately by that strategy's
-/// `config::build`.
+/// Validate the [`SharedArgs`] and resolve them into a [`RunConfig`], reading
+/// the traded universe from `--universe`. Strategy-specific flags are validated
+/// separately by that strategy's `config::build`.
 ///
 /// `strategy` is the subcommand name; `argv` is recorded verbatim in the config
 /// sidecar (pass `std::env::args().collect()`).
 pub fn build_config(args: &SharedArgs, argv: &[String], strategy: &str) -> Result<RunConfig> {
     let bases = read_universe(&args.universe)?;
+    build_config_with_bases(args, argv, strategy, bases)
+}
+
+/// [`build_config`] with the traded universe supplied by the caller rather than
+/// read from `--universe` — the `momentum --source coinmarketcap` path derives
+/// its `bases` from the CoinMarketCap snapshots instead of a universe file.
+pub fn build_config_with_bases(
+    args: &SharedArgs,
+    argv: &[String],
+    strategy: &str,
+    bases: Vec<String>,
+) -> Result<RunConfig> {
+    ensure!(!bases.is_empty(), "the resolved universe is empty");
 
     let balance = Money::from_str(args.starting_balance.trim())
         .map_err(|e| anyhow!("--starting-balance {:?}: {e}", args.starting_balance))?;

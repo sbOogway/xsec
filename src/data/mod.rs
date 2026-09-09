@@ -5,10 +5,14 @@
 //!   and [`ExchangeAdapter`](exchange::ExchangeAdapter) (what `xsec fetch`
 //!   ([`exchange::fetch`]) pulls from — [`exchange::bybit`] is the first impl).
 //!   [`exchange::cache`] owns the on-disk layout both agree on.
+//! * [`snapshot`] — point-in-time market-cap snapshots
+//!   ([`snapshot::SnapshotData`]): the `coins/cmc/` reader that gates the
+//!   `momentum --source coinmarketcap` universe.
 //! * [`universe`] — the plain-text trading-universe file reader.
 //! * [`backtest`] — per-run artifact capture (`runs/<uuid>/{config,legs,
 //!   portfolio,fills}.csv`).
 
 pub mod backtest;
 pub mod exchange;
+pub mod snapshot;
 pub mod universe;
