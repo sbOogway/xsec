@@ -85,17 +85,20 @@ pub struct RunConfig {
 /// sidecar (pass `std::env::args().collect()`).
 pub fn build_config(args: &SharedArgs, argv: &[String], strategy: &str) -> Result<RunConfig> {
     let bases = read_universe(&args.universe)?;
-    build_config_with_bases(args, argv, strategy, bases)
+    build_config_with_bases(args, argv, strategy, bases, args.universe.display().to_string())
 }
 
 /// [`build_config`] with the traded universe supplied by the caller rather than
 /// read from `--universe` — the `momentum --source coinmarketcap` path derives
-/// its `bases` from the CoinMarketCap snapshots instead of a universe file.
+/// its `bases` from the CoinMarketCap snapshots instead of a universe file, and
+/// passes a `universe_path` sentinel (e.g. `"<derived: coinmarketcap>"`) for the
+/// config sidecar's provenance row.
 pub fn build_config_with_bases(
     args: &SharedArgs,
     argv: &[String],
     strategy: &str,
     bases: Vec<String>,
+    universe_path: String,
 ) -> Result<RunConfig> {
     ensure!(!bases.is_empty(), "the resolved universe is empty");
 
@@ -126,7 +129,7 @@ pub fn build_config_with_bases(
         date_end: args.date_end.trim().to_string(),
         bases,
         starting_balance: args.starting_balance.trim().to_string(),
-        universe_path: args.universe.display().to_string(),
+        universe_path,
         argv: sanitise_argv(argv),
     })
 }

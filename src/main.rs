@@ -103,8 +103,12 @@ fn main() -> anyhow::Result<()> {
                 // `--source bybit` reads `--universe`; `--source coinmarketcap`
                 // derives its traded set from the snapshots and carries a gate
                 // that narrows the scored set each rebalance.
-                let (bases, cmc) = match args.source {
-                    Source::Bybit => (read_universe(&cli.shared.universe)?, None),
+                let (bases, universe_path, cmc) = match args.source {
+                    Source::Bybit => (
+                        read_universe(&cli.shared.universe)?,
+                        cli.shared.universe.display().to_string(),
+                        None,
+                    ),
                     Source::Coinmarketcap => {
                         let snapshots = CmcSnapshotData::open(&args.cmc_snapshots)?;
                         let resolution = Resolution::open(Path::new(CMC_RESOLUTION_PATH))?;
@@ -127,12 +131,21 @@ fn main() -> anyhow::Result<()> {
                             cli.shared.date_start,
                             cli.shared.date_end,
                         );
-                        (bases, Some(CmcGate::new(Box::new(snapshots), resolution)))
+                        (
+                            bases,
+                            "<derived: coinmarketcap>".to_string(),
+                            Some(CmcGate::new(Box::new(snapshots), resolution)),
+                        )
                     }
                 };
 
-                let run =
-                    config::build_config_with_bases(&cli.shared, &argv, strategy.name(), bases)?;
+                let run = config::build_config_with_bases(
+                    &cli.shared,
+                    &argv,
+                    strategy.name(),
+                    bases,
+                    universe_path,
+                )?;
                 let strategy_config = momentum::build(args, &run.bases)?;
                 // Echoed on stdout so the caller can key `logs/<uuid>/logs.log`
                 // and the `runs/<uuid>/` files to the same id.

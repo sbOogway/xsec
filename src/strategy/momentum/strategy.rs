@@ -9,10 +9,7 @@
 //! the rebalance clock, the price buffers, artifact capture, notional-sized
 //! orders — comes from [`crate::strategy::common::StrategyRuntime`].
 
-use std::{
-    collections::{HashMap, HashSet},
-    fmt::Debug,
-};
+use std::{collections::HashMap, fmt::Debug};
 
 use chrono::NaiveDate;
 use nautilus_common::{actor::DataActor, timer::TimeEvent};
@@ -72,20 +69,22 @@ impl CmcGate {
         let Some((_, rows)) = self.snapshots.snapshot_asof(date) else {
             return HashMap::new();
         };
-        rows.iter()
-            .take(top_n)
-            .filter_map(|row| {
-                let base = self.resolution.bybit_base(&row.cmc_symbol)?;
-                Some((
-                    config::instrument_id(base),
-                    EligibleMeta {
+        // Rows are rank-ascending, so `or_insert` keeps the better-ranked one
+        // when two CMC symbols resolve to the same Bybit base (e.g. `MATIC`
+        // and `POL` both -> `POL` across the rename).
+        let mut eligible: HashMap<InstrumentId, EligibleMeta> = HashMap::new();
+        for row in rows.iter().take(top_n) {
+            if let Some(base) = self.resolution.bybit_base(&row.cmc_symbol) {
+                eligible
+                    .entry(config::instrument_id(base))
+                    .or_insert_with(|| EligibleMeta {
                         rank: row.rank,
                         cmc_id: row.cmc_id,
                         cmc_symbol: row.cmc_symbol.clone(),
-                    },
-                ))
-            })
-            .collect()
+                    });
+            }
+        }
+        eligible
     }
 }
 
@@ -307,39 +306,6 @@ impl DataActor for Momentum {
 
         log::info!("rebalance: long {long_signals:#?} short {short_signals:#?}");
 
-        // Record the point-in-time resolved universe for a `--source
-        // coinmarketcap` run: every eligible name that scored, its CMC rank,
-        // and where it landed in the book.
-        if let Some(eligible) = eligible.as_ref() {
-            let longs: HashSet<InstrumentId> = long_signals.iter().map(|(id, _)| *id).collect();
-            let shorts: HashSet<InstrumentId> = short_signals.iter().map(|(id, _)| *id).collect();
-            let mut rows: Vec<SelectionRow> = scores
-                .iter()
-                .filter_map(|(id, score)| {
-                    let meta = eligible.get(id)?;
-                    let side = if longs.contains(id) {
-                        "long"
-                    } else if shorts.contains(id) {
-                        "short"
-                    } else {
-                        "none"
-                    };
-                    Some(SelectionRow {
-                        cmc_rank: meta.rank,
-                        cmc_symbol: meta.cmc_symbol.clone(),
-                        cmc_id: meta.cmc_id,
-                        instrument_id: *id,
-                        score: *score,
-                        side,
-                    })
-                })
-                .collect();
-            rows.sort_by_key(|row| row.cmc_rank);
-            if let Some(capture) = self.runtime_mut().capture.as_mut() {
-                capture.record_selection(period, &rows);
-            }
-        }
-
         // Target book: the side we want each name on this turnover.
         let mut target: HashMap<InstrumentId, OrderSide> = HashMap::new();
         for (id, _) in &long_signals {
@@ -420,6 +386,37 @@ impl DataActor for Momentum {
         }
         for (instrument, side, ..) in &opened {
             self.book.insert(*instrument, *side);
+        }
+
+        // Record the point-in-time resolved universe for a `--source
+        // coinmarketcap` run: every eligible name that scored, its CMC rank,
+        // and the side it *actually* landed on in the (now-updated) book —
+        // `none` if it wasn't in a slice, or its order was skipped (below min
+        // lot, no bar).
+        if let Some(eligible) = eligible.as_ref() {
+            let mut rows: Vec<SelectionRow> = scores
+                .iter()
+                .filter_map(|(id, score)| {
+                    let meta = eligible.get(id)?;
+                    let side = match self.book.get(id).copied() {
+                        Some(OrderSide::Buy) => "long",
+                        Some(OrderSide::Sell) => "short",
+                        _ => "none",
+                    };
+                    Some(SelectionRow {
+                        cmc_rank: meta.rank,
+                        cmc_symbol: meta.cmc_symbol.clone(),
+                        cmc_id: meta.cmc_id,
+                        instrument_id: *id,
+                        score: *score,
+                        side,
+                    })
+                })
+                .collect();
+            rows.sort_by_key(|row| row.cmc_rank);
+            if let Some(capture) = self.runtime_mut().capture.as_mut() {
+                capture.record_selection(period, &rows);
+            }
         }
 
         let marks = self.runtime().latest_closes();

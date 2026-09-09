@@ -17,13 +17,14 @@ use std::{
 use anyhow::{Context, Result, bail, ensure};
 use chrono::NaiveDate;
 
-use super::{SnapshotData, SnapshotRow};
+use super::{InMemorySnapshotData, SnapshotData, SnapshotRow};
 
-/// The `coins/cmc/<YYYYMMDD>.csv` snapshots, loaded once into memory.
+/// The `coins/cmc/<YYYYMMDD>.csv` snapshots, loaded once into memory. Reading
+/// the directory is the only thing specific to this impl; lookups delegate to
+/// [`InMemorySnapshotData`].
 #[derive(Debug)]
 pub struct CmcSnapshotData {
-    dates: Vec<NaiveDate>,
-    by_date: BTreeMap<NaiveDate, Vec<SnapshotRow>>,
+    inner: InMemorySnapshotData,
 }
 
 impl CmcSnapshotData {
@@ -61,22 +62,18 @@ impl CmcSnapshotData {
         );
 
         Ok(Self {
-            dates: by_date.keys().copied().collect(),
-            by_date,
+            inner: InMemorySnapshotData::new(by_date),
         })
     }
 }
 
 impl SnapshotData for CmcSnapshotData {
     fn dates(&self) -> &[NaiveDate] {
-        &self.dates
+        self.inner.dates()
     }
 
     fn snapshot_asof(&self, date: NaiveDate) -> Option<(NaiveDate, &[SnapshotRow])> {
-        self.by_date
-            .range(..=date)
-            .next_back()
-            .map(|(d, rows)| (*d, rows.as_slice()))
+        self.inner.snapshot_asof(date)
     }
 }
 
