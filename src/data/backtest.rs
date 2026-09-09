@@ -36,7 +36,7 @@ use std::{
     collections::{BTreeMap, HashMap},
     fs::{self, File, OpenOptions},
     io::{BufWriter, Write},
-    path::Path,
+    path::{Path, PathBuf},
 };
 
 use anyhow::{Context, Result};
@@ -52,6 +52,22 @@ pub const LEGS_HEADER: &str = "run_id,period,period_end_date,instrument_id,side,
 pub const PORTFOLIO_HEADER: &str = "run_id,period,period_end_date,n_long,n_short,gross_return,fee_paid_usdt,net_return,equity_end_of_period_usdt,n_fills,fills_ref";
 pub const FILLS_HEADER: &str =
     "run_id,ts_event,instrument_id,side,order_side,quantity,fill_price,fee_usdt";
+pub const SELECTION_HEADER: &str =
+    "run_id,period,period_end_date,cmc_rank,cmc_symbol,cmc_id,instrument_id,score,side";
+
+/// One candidate in a `--source coinmarketcap` rebalance: an eligible name (in
+/// that date's CoinMarketCap snapshot top-N and resolved to a Bybit perp) that
+/// produced a score, and where it landed in the book. Rows for one rebalance
+/// are written together by [`RunCapture::record_selection`].
+pub struct SelectionRow {
+    pub cmc_rank: u32,
+    pub cmc_symbol: String,
+    pub cmc_id: u64,
+    pub instrument_id: InstrumentId,
+    pub score: f64,
+    /// `"long"` | `"short"` | `"none"`.
+    pub side: &'static str,
+}
 
 /// The shared run configuration, written to `<UUID>/config.csv` (with the
 /// strategy's own rows appended) so a tearsheet — or a human — can label a run
@@ -88,9 +104,16 @@ struct PeriodAccrual {
 pub struct RunCapture<P: RebalancePeriod> {
     run_id: String,
     fills_ref: String,
+    /// The run's directory (`runs/<run_id>/` or a test's tmp equivalent), kept
+    /// so `cmc_selection.csv` can be opened lazily.
+    run_dir: PathBuf,
     legs: BufWriter<File>,
     portfolio: BufWriter<File>,
     fills: BufWriter<File>,
+    /// `runs/<run_id>/cmc_selection.csv`, opened on the first
+    /// [`record_selection`](Self::record_selection) — so a `--source bybit` run
+    /// never creates the file.
+    selection: Option<BufWriter<File>>,
     /// Turnover periods carrying fee accrual until their portfolio row is
     /// written, oldest first.
     periods: BTreeMap<P, PeriodAccrual>,
@@ -133,9 +156,11 @@ impl<P: RebalancePeriod> RunCapture<P> {
         Ok(Self {
             run_id: cfg.run_id.clone(),
             fills_ref: fills_path.to_string_lossy().into_owned(),
+            run_dir: dir,
             legs,
             portfolio,
             fills,
+            selection: None,
             periods: BTreeMap::new(),
             open_book: BTreeMap::new(),
             last_turnover: None,
@@ -193,6 +218,40 @@ impl<P: RebalancePeriod> RunCapture<P> {
         let accrual = self.periods.entry(period).or_default();
         accrual.fee_paid += fee_usdt;
         accrual.n_fills += 1;
+    }
+
+    /// Write one `cmc_selection.csv` block for `period` — the point-in-time
+    /// resolved universe of a `--source coinmarketcap` rebalance. The file is
+    /// created on the first call, so `--source bybit` runs never produce it.
+    /// `rows` should already be in CMC-rank order.
+    pub fn record_selection(&mut self, period: P, rows: &[SelectionRow]) {
+        if self.selection.is_none() {
+            match open_appending(&self.run_dir.join("cmc_selection.csv"), SELECTION_HEADER) {
+                Ok(writer) => self.selection = Some(writer),
+                Err(e) => {
+                    log::error!("cmc_selection.csv: {e:#}");
+                    return;
+                }
+            }
+        }
+        let writer = self.selection.as_mut().expect("just opened");
+        let end_date = period.end_date();
+        for row in rows {
+            let _ = writeln!(
+                writer,
+                "{},{},{},{},{},{},{},{:.6},{}",
+                self.run_id,
+                period.label(),
+                end_date,
+                row.cmc_rank,
+                row.cmc_symbol,
+                row.cmc_id,
+                row.instrument_id,
+                row.score,
+                row.side,
+            );
+        }
+        let _ = writer.flush();
     }
 
     /// Record a turnover of the carried book at `turnover_period`:
@@ -264,6 +323,9 @@ impl<P: RebalancePeriod> RunCapture<P> {
         let _ = self.legs.flush();
         let _ = self.portfolio.flush();
         let _ = self.fills.flush();
+        if let Some(selection) = self.selection.as_mut() {
+            let _ = selection.flush();
+        }
     }
 
     /// Finalise the turnover period `prev`: mark every still-open leg forward

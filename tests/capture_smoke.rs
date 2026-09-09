@@ -18,7 +18,7 @@ use rust_decimal::Decimal;
 use tempfile::tempdir;
 
 use nautilus_model::{enums::OrderSide, identifiers::InstrumentId};
-use xsec::data::backtest::{RunCapture, RunConfig};
+use xsec::data::backtest::{RunCapture, RunConfig, SelectionRow};
 use xsec::period::{IsoWeek, YearMonth};
 
 // The schema downstream tooling depends on — pinned here as literals so a
@@ -27,6 +27,8 @@ const LEGS_HEADER: &str = "run_id,period,period_end_date,instrument_id,side,entr
 const PORTFOLIO_HEADER: &str = "run_id,period,period_end_date,n_long,n_short,gross_return,fee_paid_usdt,net_return,equity_end_of_period_usdt,n_fills,fills_ref";
 const FILLS_HEADER: &str =
     "run_id,ts_event,instrument_id,side,order_side,quantity,fill_price,fee_usdt";
+const SELECTION_HEADER: &str =
+    "run_id,period,period_end_date,cmc_rank,cmc_symbol,cmc_id,instrument_id,score,side";
 
 /// The carried-book flow with fills and a config sidecar, on an [`IsoWeek`]
 /// cadence: proves `RunCapture<P>` works for a second, independently-implemented
@@ -394,6 +396,70 @@ fn capture_writes_the_contract_for_a_side_flip() {
     assert_eq!(by_period("2026-01")[3], "1", "n_long Jan");
     assert_eq!(by_period("2026-02")[5], "0.050000", "gross_return Feb");
     assert_eq!(by_period("2026-02")[4], "1", "n_short Feb");
+}
+
+/// `cmc_selection.csv` is written only when the strategy calls
+/// `record_selection` (a `--source coinmarketcap` run), and its header is a
+/// contract for a future `legs.py` attribution section. Pins both.
+#[test]
+fn selection_capture_is_lazy_and_pins_its_schema() {
+    let dir = tempdir().unwrap();
+    let run_id = "test-0003-selection";
+    let cfg = RunConfig {
+        run_id: run_id.to_string(),
+        strategy: "momentum".to_string(),
+        exchange: "bybit".to_string(),
+        date_start: "2024-01-01".to_string(),
+        date_end: "2024-02-01".to_string(),
+        bases: vec!["BTC".to_string(), "ETH".to_string()],
+        starting_balance: "1000 USDT".to_string(),
+        universe_path: "<derived: coinmarketcap>".to_string(),
+        argv: "xsec momentum --source coinmarketcap".to_string(),
+    };
+
+    let mut capture: RunCapture<YearMonth> =
+        RunCapture::open_in(dir.path(), &cfg, &[]).unwrap();
+    let run_dir = dir.path().join(run_id);
+
+    // Nothing recorded yet -> no file (a --source bybit run never makes one).
+    assert!(!run_dir.join("cmc_selection.csv").exists());
+
+    let jan = YearMonth { year: 2024, month: 1 };
+    capture.record_selection(
+        jan,
+        &[
+            SelectionRow {
+                cmc_rank: 1,
+                cmc_symbol: "BTC".to_string(),
+                cmc_id: 1,
+                instrument_id: InstrumentId::from("BTCUSDT-LINEAR.BYBIT"),
+                score: 0.123_456_7,
+                side: "long",
+            },
+            SelectionRow {
+                cmc_rank: 8,
+                cmc_symbol: "ETH".to_string(),
+                cmc_id: 1027,
+                instrument_id: InstrumentId::from("ETHUSDT-LINEAR.BYBIT"),
+                score: -0.05,
+                side: "none",
+            },
+        ],
+    );
+    capture.finish_book(&HashMap::new(), Decimal::from(1000));
+    drop(capture);
+
+    let selection = read_csv(run_dir.join("cmc_selection.csv"));
+    assert_eq!(selection.header, SELECTION_HEADER);
+    assert_eq!(selection.rows.len(), 2);
+    assert_eq!(selection.rows[0][0], run_id);
+    assert_eq!(selection.rows[0][1], "2024-01");
+    assert_eq!(selection.rows[0][3], "1", "cmc_rank");
+    assert_eq!(selection.rows[0][4], "BTC");
+    assert_eq!(selection.rows[0][6], "BTCUSDT-LINEAR.BYBIT");
+    assert_eq!(selection.rows[0][7], "0.123457", "score, 6dp");
+    assert_eq!(selection.rows[0][8], "long");
+    assert_eq!(selection.rows[1][8], "none");
 }
 
 struct Csv {
