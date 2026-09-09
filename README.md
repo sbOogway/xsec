@@ -114,6 +114,17 @@ Blank lines and lines starting with `#` are ignored, as is an inline `# …` aft
 a symbol; symbols are upper-cased and de-duplicated. Point `--universe` at
 another file to run a different basket without touching the default.
 
+`scripts/` + the `make snapshot_*` targets build universe files from live data —
+`bybit_turnover_ranking.sh`, `coingecko_top_ranking.sh` and
+`coinmarketcap_top_ranking.sh` rank a *current* top-N by turnover or market cap.
+For a *historical* top-N, `make snapshot_cmc_history` scrapes CoinMarketCap's
+daily market-cap rankings into `coins/cmc/<YYYYMMDD>.csv`, one file per day, no
+API key (a regenerable local cache, gitignored like `data/`; ~2,400 files for
+the 2020-onwards default). `make universe_cmc_union` then flattens a date range
+of those into one committed universe file — the union of every base asset that
+was ever top-N, annotated against Bybit, ready for `--universe` (and the input
+to a future `momentum --source coinmarketcap`).
+
 ## Parameter search
 
 ```sh

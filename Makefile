@@ -34,7 +34,7 @@ STRATEGY ?= momentum
 UNIVERSE ?= universe.txt
 EXCHANGE ?= bybit
 
-.PHONY: fetch tearsheet backtest report optimize snapshot_bybit_top snapshot_coingecko_top snapshot_coingecko_bybit_top
+.PHONY: fetch tearsheet backtest report optimize snapshot_bybit_top snapshot_coingecko_top snapshot_coingecko_bybit_top snapshot_cmc_history universe_cmc_union
 
 ## Download $(EXCHANGE) instruments + bar history for $(UNIVERSE) into
 ## data/$(EXCHANGE)/. Run once before `make backtest` / `make tearsheet`; re-run
@@ -85,3 +85,40 @@ snapshot_coingecko_bybit_top:
 	  ./scripts/coingecko_top_ranking.sh --all --by $(CG_BY) | tac | cut -d':' -f1 | head -$(UNIVERSE_SIZE) \
 	    | ./scripts/bybit_listing_check.sh --annotate; \
 	} > coins/coingecko_bybit_top_$(UNIVERSE_SIZE)_$$ts.txt
+
+# CoinMarketCap historical snapshots: date range and ranking depth. `make
+# universe_cmc_union` scrapes any missing days first, so setting these on either
+# target keeps the scrape and the flattened universe consistent.
+CMC_FROM ?= 2020-01-01
+CMC_TO ?= $(shell date --utc +%F)
+CMC_LIMIT ?= 200
+
+## Scrape CoinMarketCap's historical daily market-cap rankings into the
+## coins/cmc/ local cache (gitignored, like data/), one file per day over
+## [CMC_FROM, CMC_TO]:
+##   make snapshot_cmc_history CMC_FROM=2024-01-01 CMC_TO=2024-02-01 CMC_LIMIT=200
+## Idempotent — re-run to resume; SCRAPE_ARGS="--refresh" re-fetches existing
+## days, SCRAPE_ARGS="--tor" routes requests through Tor.
+snapshot_cmc_history:
+	./scripts/coinmarketcap_snapshot_scrape.sh --from $(CMC_FROM) --to $(CMC_TO) --limit $(CMC_LIMIT) $(SCRAPE_ARGS)
+
+## The union of every base asset that appeared in any coins/cmc/ snapshot in
+## [CMC_FROM, CMC_TO] as a ready-to-use universe file at
+## coins/cmc_union_<from>_<to>_<ts>.txt: tradeable names as their Bybit base
+## coin, stablecoins and names with no Bybit USDT perp commented out with the
+## reason. Scrapes any missing days first.
+universe_cmc_union: snapshot_cmc_history
+	ts=$$(date --utc +%Y-%m-%dT%H:%M:%S%Z); \
+	from=$$(echo "$(CMC_FROM)" | tr -d '-'); to=$$(echo "$(CMC_TO)" | tr -d '-'); \
+	{ \
+	  echo "# CoinMarketCap historical top $(CMC_LIMIT) union, $(CMC_FROM)..$(CMC_TO) as of $$ts;"; \
+	  echo "# every base asset that appeared in any daily snapshot in range;"; \
+	  echo "# stablecoins and names with no Bybit USDT perp are commented out."; \
+	  echo; \
+	  for f in coins/cmc/*.csv; do \
+	    d=$$(basename "$$f" .csv); \
+	    [[ "$$d" =~ ^[0-9]{8}$$ ]] || continue; \
+	    (( 10#$$d >= 10#$$from && 10#$$d <= 10#$$to )) || continue; \
+	    tail -n +2 "$$f" | cut -d, -f3 | tr -d '"'; \
+	  done | sort -u | ./scripts/bybit_listing_check.sh --annotate; \
+	} > coins/cmc_union_$(CMC_FROM)_$(CMC_TO)_$$ts.txt
