@@ -1,14 +1,12 @@
-//! Bybit data adapter: bar-type construction, the on-disk bar cache, and the
-//! shared HTTP client that fetches linear-perp instruments and monthly bar
-//! history. [`BybitMarketData`] is the production [`MarketData`] the backtest
-//! bootstrap ([`crate::engine`]) pulls through; [`get_bar_type`] and the raw
-//! fetch functions are also used by the rebalance runtime in
-//! [`crate::strategy::common`].
+//! Bybit: the [`BybitAdapter`] `xsec fetch` pulls from, over a shared HTTP
+//! client. [`get_bar_type`] is public because the rebalance runtime in
+//! [`crate::strategy::common`] also builds bar types; everything else here is
+//! the adapter's own plumbing. No disk — the cache layout lives in
+//! [`super::cache`].
 
-use std::{fs, path::PathBuf};
+use std::sync::OnceLock;
 
 use anyhow::{Context, Result};
-use chrono::{DateTime, Utc};
 use nautilus_bybit::{common::enums::BybitProductType, http::client::BybitHttpClient};
 use nautilus_model::{
     data::{Bar, BarSpecification, BarType},
@@ -17,11 +15,9 @@ use nautilus_model::{
     instruments::InstrumentAny,
 };
 
-use crate::data::exchange::MarketData;
+use crate::data::exchange::ExchangeAdapter;
 
-const DATA_DIR: &str = "data";
-const STALE_AFTER_HOURS: i64 = 24;
-
+/// The external daily [`BarType`] for `instrument_id` at `aggregation`.
 pub fn get_bar_type(instrument_id: InstrumentId, aggregation: BarAggregation) -> BarType {
     BarType::new(
         instrument_id,
@@ -29,29 +25,45 @@ pub fn get_bar_type(instrument_id: InstrumentId, aggregation: BarAggregation) ->
         AggregationSource::External,
     )
 }
-// cons
 
-fn cache_path(instrument_id: &InstrumentId) -> PathBuf {
-    let sym = instrument_id.symbol.as_str();
-    let bare = sym.split_once('-').map(|(b, _)| b).unwrap_or(sym);
-    PathBuf::from(DATA_DIR).join(format!("{bare}_1M.msgpack"))
+/// The Bybit [`ExchangeAdapter`]: the HTTP calls below, plus a Tokio runtime so
+/// [`fetch::run`](super::fetch::run) can stay synchronous.
+pub struct BybitAdapter {
+    rt: tokio::runtime::Runtime,
 }
 
-fn cache_is_fresh(bars: &[Bar]) -> bool {
-    let Some(last) = bars.last() else {
-        return false;
-    };
-    let last_ms = last.ts_event.as_u64() / 1_000_000;
-    let now_ms = Utc::now().timestamp_millis() as u64;
-    let age_hours = now_ms.saturating_sub(last_ms) / 3_600_000;
-    age_hours <= STALE_AFTER_HOURS as u64
+impl BybitAdapter {
+    /// Create the adapter and its Tokio runtime.
+    pub fn new() -> Result<Self> {
+        Ok(Self {
+            rt: tokio::runtime::Runtime::new().context("tokio runtime for BybitAdapter")?,
+        })
+    }
 }
 
-/// Fetch all Bybit linear instruments, once, and cache them on the client.
-/// Subsequent per-symbol calls reuse this seeded cache so we don't burn a
-/// full instruments request for every ticker.
-pub async fn fetch_linear_instruments() -> Result<Vec<InstrumentAny>> {
-    let client = BybitHttpClient::default();
+impl ExchangeAdapter for BybitAdapter {
+    fn venue(&self) -> &'static str {
+        "BYBIT"
+    }
+
+    fn instruments(&self) -> Result<Vec<InstrumentAny>> {
+        self.rt.block_on(fetch_linear_instruments())
+    }
+
+    fn perp_id(&self, base: &str) -> InstrumentId {
+        InstrumentId::from(format!("{base}USDT-LINEAR.BYBIT").as_str())
+    }
+
+    fn bars(&self, instrument_id: InstrumentId) -> Result<Vec<Bar>> {
+        self.rt.block_on(fetch_bars(instrument_id))
+    }
+}
+
+/// Fetch every Bybit linear instrument and seed the shared client's cache, so
+/// the per-symbol [`fetch_bars`] calls resolve symbols without re-requesting the
+/// list.
+async fn fetch_linear_instruments() -> Result<Vec<InstrumentAny>> {
+    let client = shared_client();
     let instruments = client
         .request_instruments(BybitProductType::Linear, None, None)
         .await
@@ -60,30 +72,12 @@ pub async fn fetch_linear_instruments() -> Result<Vec<InstrumentAny>> {
     Ok(instruments)
 }
 
-/// Fetch the monthly bar history for `instrument_id`. Uses a shared client
-/// that has had instruments seeded by `fetch_linear_instruments`, so we
-/// don't refetch the instruments list per symbol.
-/// Results are cached on disk in Nautilus msgpack; subsequent calls within
-/// `STALE_AFTER_HOURS` of the last bar skip the network.
-pub async fn fetch_bars_cached(
-    instrument_id: InstrumentId,
-    aggregation: BarAggregation,
-) -> Result<Vec<Bar>> {
-    fs::create_dir_all(DATA_DIR).ok();
-
-    let bar_type = get_bar_type(instrument_id, aggregation);
-    let path = cache_path(&instrument_id);
-    if let Ok(bytes) = fs::read(&path)
-        && let Ok(bars) = rmp_serde::from_slice::<Vec<Bar>>(&bytes)
-        && cache_is_fresh(&bars)
-    {
-        println!("[data] cache hit: {instrument_id} ({} bars)", bars.len());
-        return Ok(bars);
-    }
-
-    println!("[data] fetching: {instrument_id}");
-    let client = shared_client();
-    let bars = client
+/// Fetch the full daily-bar history for `instrument_id`. Requires
+/// [`fetch_linear_instruments`] to have run first so the shared client can
+/// resolve the symbol.
+async fn fetch_bars(instrument_id: InstrumentId) -> Result<Vec<Bar>> {
+    let bar_type = get_bar_type(instrument_id, BarAggregation::Day);
+    let bars = shared_client()
         .request_bars(BybitProductType::Linear, bar_type, None, None, None, true)
         .await
         .context("bybit request_bars")?;
@@ -91,60 +85,34 @@ pub async fn fetch_bars_cached(
     // Pace cold fetches to stay under Bybit's per-second rate caps.
     tokio::time::sleep(std::time::Duration::from_millis(20)).await;
 
-    let bytes = rmp_serde::to_vec_named(&bars)?;
-    let tmp = path.with_extension("msgpack.tmp");
-    fs::write(&tmp, &bytes).with_context(|| format!("write {}", tmp.display()))?;
-    fs::rename(&tmp, &path).with_context(|| format!("rename to {}", path.display()))?;
-
-    println!("[data] cached {} bars for {instrument_id}", bars.len());
     Ok(bars)
 }
 
+/// The process-wide Bybit HTTP client. Clones share one instrument cache, so a
+/// list seeded by [`fetch_linear_instruments`] is visible to every later
+/// [`fetch_bars`].
 fn shared_client() -> BybitHttpClient {
-    use std::sync::OnceLock;
     static CLIENT: OnceLock<BybitHttpClient> = OnceLock::new();
     CLIENT.get_or_init(BybitHttpClient::default).clone()
 }
 
-/// Seed the shared bybit client with the instruments list from
-/// `fetch_linear_instruments`. Must be called once before the first
-/// `fetch_bars_cached` so `request_bars` can resolve symbols.
-pub fn seed_instruments(instruments: &[InstrumentAny]) {
-    shared_client().cache_instruments(instruments);
-}
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-#[allow(dead_code)]
-pub fn parse_date(s: &str) -> Result<DateTime<Utc>> {
-    DateTime::parse_from_rfc3339(s)
-        .map(|d| d.with_timezone(&Utc))
-        .with_context(|| format!("parse date {s}"))
-}
-
-/// The production [`MarketData`]: Bybit's HTTP API with the on-disk bar cache.
-/// Owns a Tokio runtime so the backtest bootstrap can stay synchronous —
-/// `instruments` and `bars` block on the async fetch functions above.
-pub struct BybitMarketData {
-    rt: tokio::runtime::Runtime,
-}
-
-impl BybitMarketData {
-    /// Create the adapter and its Tokio runtime.
-    pub fn new() -> Result<Self> {
-        Ok(Self {
-            rt: tokio::runtime::Runtime::new().context("tokio runtime for BybitMarketData")?,
-        })
-    }
-}
-
-impl MarketData for BybitMarketData {
-    fn instruments(&self) -> Result<Vec<InstrumentAny>> {
-        let instruments = self.rt.block_on(fetch_linear_instruments())?;
-        // Prime the shared client so `bars` can resolve symbols.
-        seed_instruments(&instruments);
-        Ok(instruments)
+    #[test]
+    fn adapter_venue_and_perp_id() {
+        let adapter = BybitAdapter::new().unwrap();
+        assert_eq!(adapter.venue(), "BYBIT");
+        assert_eq!(
+            adapter.perp_id("BTC"),
+            InstrumentId::from("BTCUSDT-LINEAR.BYBIT"),
+        );
     }
 
-    fn bars(&self, instrument_id: InstrumentId, aggregation: BarAggregation) -> Result<Vec<Bar>> {
-        self.rt.block_on(fetch_bars_cached(instrument_id, aggregation))
+    #[test]
+    fn get_bar_type_is_one_day_last_external() {
+        let bar_type = get_bar_type(InstrumentId::from("BTCUSDT-LINEAR.BYBIT"), BarAggregation::Day);
+        assert_eq!(bar_type.to_string(), "BTCUSDT-LINEAR.BYBIT-1-DAY-LAST-EXTERNAL");
     }
 }

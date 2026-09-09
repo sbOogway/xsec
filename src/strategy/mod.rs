@@ -7,7 +7,9 @@
 //! plus small cross-strategy helpers, lives once in [`common`].
 //!
 //! The binary picks a strategy with a clap subcommand ([`StrategyKind`]); each
-//! variant carries that strategy's [`clap::Args`].
+//! variant carries that strategy's [`clap::Args`]. `main` folds this enum into
+//! its top-level `Command` (alongside `fetch`) with `#[command(flatten)]`, so
+//! the strategy names stay direct subcommands of `xsec`.
 
 pub mod common;
 pub mod momentum;

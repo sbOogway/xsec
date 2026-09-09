@@ -288,21 +288,21 @@ mod tests {
     #[test]
     fn defaults_are_stable() {
         let cfg = build(&args(&[]), &bases(20)).unwrap();
-        assert_eq!(cfg.fast_days, 1);
+        assert_eq!(cfg.fast_days, 7);
         assert_eq!(cfg.medium_days, 3);
-        assert_eq!(cfg.slow_days, 7);
+        assert_eq!(cfg.slow_days, 30);
         assert_eq!(cfg.fast_weight, 0.3);
         assert_eq!(cfg.medium_weight, 0.0);
         assert_eq!(cfg.slow_weight, 0.7);
         assert_eq!(cfg.top_n, 5);
         assert_eq!(cfg.short_n, 5);
         assert_eq!(cfg.long_short_balance, 0.5);
-        assert_eq!(cfg.regime_lookback_days, 20);
-        assert!(!cfg.regime_filter);
+        assert_eq!(cfg.regime_lookback_days, 30);
+        assert!(cfg.regime_filter);
         assert_eq!(cfg.risk_fraction, 0.8);
         assert_eq!(cfg.allocation_tilt, 0.0);
         assert_eq!(cfg.holding_period, HoldingPeriod::Day);
-        assert_eq!(cfg.number_holding_periods, 1);
+        assert_eq!(cfg.number_holding_periods, 7);
     }
 
     #[test]
@@ -319,9 +319,13 @@ mod tests {
 
     #[test]
     fn long_only_needs_no_btc() {
-        // regime filter off (default) and short-n 0: a BTC-less universe is fine.
+        // regime filter off and short-n 0: a BTC-less universe is fine.
         let no_btc: Vec<String> = (0..20).map(|i| format!("SYM{i}")).collect();
-        let cfg = build(&args(&["--short-n", "0"]), &no_btc).unwrap();
+        let cfg = build(
+            &args(&["--short-n", "0", "--regime-filter", "false"]),
+            &no_btc,
+        )
+        .unwrap();
         assert_eq!(cfg.short_n, 0);
         assert!(!cfg.regime_filter);
     }
@@ -367,11 +371,11 @@ mod tests {
     }
 
     #[test]
-    fn rejects_long_w_out_of_range() {
-        let err = build(&args(&["--long-w", "1.5"]), &bases(20))
+    fn rejects_long_short_balance_out_of_range() {
+        let err = build(&args(&["--long-short-balance", "1.5"]), &bases(20))
             .unwrap_err()
             .to_string();
-        assert!(err.contains("--long-w must be in"), "{err}");
+        assert!(err.contains("must be in [0.0, 1.0]"), "{err}");
     }
 
     #[test]

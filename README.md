@@ -1,7 +1,8 @@
 # xsec
 
 Cross-sectional momentum backtests on [Nautilus Trader](https://nautilustrader.io/)
-over a basket of Bybit USDT-margined linear perpetuals.
+over a basket of USDT-margined linear perpetuals (Bybit by default; `--exchange`
+picks the venue).
 
 One strategy, `momentum`: rank the universe by a composite fast/medium/slow
 momentum score, hold the top `--top-n` names long and the bottom `--short-n`
@@ -20,12 +21,33 @@ Each run produces two per-run HTML reports alongside the log: a QuantStats
 
 - Rust toolchain (edition 2024)
 - [`uv`](https://docs.astral.sh/uv/) for the Python tearsheet step
-- Bybit HTTP API reachable (bar history is fetched on first run and cached
-  under `data/`, which is gitignored)
+- The exchange's HTTP API reachable for `make fetch` (see below). Backtests
+  themselves run offline against the `data/<exchange>/` cache, which is gitignored.
+
+## Fetch the data first
+
+A backtest reads bar history and the instrument list from the
+`data/<exchange>/` cache only — it never reaches the network. Populate it with
+`xsec fetch`:
+
+```sh
+make fetch                                # bybit, universe.txt
+make fetch UNIVERSE=coins/my_universe.txt
+make fetch EXCHANGE=bybit                 # only bybit today
+```
+
+`xsec fetch` downloads the venue's linear-instruments list and every universe
+symbol's full daily-bar history into `data/<exchange>/`, and writes
+`data/<exchange>/manifest.json` (what resolved to a perp on the venue, and each
+symbol's bar coverage). Re-run it to refresh; `FETCH_ARGS="--refresh"` forces a
+re-download of caches that are still fresh. Coins with no USDT perp on the venue
+are logged and skipped. A backtest against a missing cache stops with a pointer
+to run this first.
 
 ## End-to-end workflow
 
 ```sh
+make fetch                  # once — populate data/<exchange>/ from the venue
 make tearsheet              # fresh run, generated UUID-7
 make tearsheet UUID=<id>    # pin / re-render a specific run id
 ```
@@ -38,14 +60,15 @@ prints `run_id=<UUID>` on stdout.
 ## Configuring a run
 
 A run picks its strategy with a subcommand. `cargo run --bin xsec -- --help`
-lists the strategies (there is one, `momentum`);
-`cargo run --bin xsec -- momentum --help` lists its knobs.
+lists the subcommands — `fetch` (see above) and the strategies (one strategy,
+`momentum`); `cargo run --bin xsec -- momentum --help` lists its knobs.
 
 **Shared flags:**
 
 | Flag | Default | What it does |
 | --- | --- | --- |
 | `--universe <file>`     | `universe.txt` | the coin universe (see below) |
+| `--exchange <venue>`    | `bybit` | which venue's `data/<venue>/` cache to fetch / read (only `bybit` today) |
 | `--starting-balance <b>`| `1_000 USDT` | simulated account starting balance (USDT only) |
 | `--date-start` / `--date-end` | `2020-01-01` / `2026-09-02` | backtest window (`YYYY-MM-DD`) |
 | `--uuid <id>`           | fresh UUID-7 | keys `runs/<id>/` and `logs/<id>/` |
@@ -86,10 +109,21 @@ make tearsheet ARGS="--short-n 0 --regime-filter true"
 ### The universe file
 
 `universe.txt` at the repo root is the traded universe: one base asset per line
-(`BTC`, `ETH`, …), each traded as `<SYM>USDT-LINEAR.BYBIT`. Blank lines and
-lines starting with `#` are ignored, as is an inline `# …` after a symbol;
-symbols are upper-cased and de-duplicated. Point `--universe` at another file to
-run a different basket without touching the default.
+(`BTC`, `ETH`, …), each traded as `<SYM>USDT-LINEAR.<VENUE>` (`--exchange`).
+Blank lines and lines starting with `#` are ignored, as is an inline `# …` after
+a symbol; symbols are upper-cased and de-duplicated. Point `--universe` at
+another file to run a different basket without touching the default.
+
+`scripts/` + the `make snapshot_*` targets build universe files from live data —
+`bybit_turnover_ranking.sh`, `coingecko_top_ranking.sh` and
+`coinmarketcap_top_ranking.sh` rank a *current* top-N by turnover or market cap.
+For a *historical* top-N, `make snapshot_cmc_history` scrapes CoinMarketCap's
+daily market-cap rankings into `coins/cmc/<YYYYMMDD>.csv`, one file per day, no
+API key (a regenerable local cache, gitignored like `data/`; ~2,400 files for
+the 2020-onwards default). `make universe_cmc_union` then flattens a date range
+of those into one committed universe file — the union of every base asset that
+was ever top-N, annotated against Bybit, ready for `--universe` (and the input
+to a future `momentum --source coinmarketcap`).
 
 ## Parameter search
 

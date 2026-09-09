@@ -449,6 +449,7 @@ fn write_config(path: &Path, cfg: &RunConfig, strategy_rows: &[(String, String)]
     writeln!(w, "run_id,{}", cfg.run_id)?;
     writeln!(w, "generated_at,{generated_at}")?;
     writeln!(w, "strategy,{}", cfg.strategy)?;
+    writeln!(w, "exchange,{}", cfg.exchange)?;
     writeln!(w, "date_start,{}", cfg.date_start)?;
     writeln!(w, "date_end,{}", cfg.date_end)?;
     writeln!(w, "starting_balance,{}", cfg.starting_balance)?;
