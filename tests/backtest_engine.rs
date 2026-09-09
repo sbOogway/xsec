@@ -112,6 +112,7 @@ fn build_backtest_engine_wires_a_fixture_market_without_network() {
     let run = RunConfig {
         run_id: "test-engine-boot".to_string(),
         strategy: "momentum".to_string(),
+        exchange: "bybit".to_string(),
         date_start: "2024-01-01".to_string(),
         date_end: "2024-03-01".to_string(),
         bases: bases.clone(),
@@ -174,6 +175,7 @@ fn build_backtest_engine_wires_over_the_disk_cache() {
     let run = RunConfig {
         run_id: "test-engine-boot-cached".to_string(),
         strategy: "momentum".to_string(),
+        exchange: "bybit".to_string(),
         date_start: "2024-01-01".to_string(),
         date_end: "2024-03-01".to_string(),
         bases: bases.clone(),

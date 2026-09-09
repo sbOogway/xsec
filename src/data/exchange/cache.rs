@@ -1,12 +1,13 @@
-//! The `data/` cache: the on-disk file layout `xsec fetch` ([`super::fetch`])
-//! writes, and [`CachedMarketData`] — the offline [`MarketData`] a backtest
-//! reads through. No network here.
+//! The `data/<venue>/` cache: the on-disk file layout `xsec fetch`
+//! ([`super::fetch`]) writes, and [`CachedMarketData`] — the offline
+//! [`MarketData`] a backtest reads through. No network here. All paths take an
+//! explicit `data_dir` (the per-venue root), so nothing here knows the venue.
 //!
 //! | file | content |
 //! | --- | --- |
 //! | `<base>_1d.msgpack` | one symbol's full daily-bar history (Nautilus msgpack) |
-//! | `instruments.json` | the Bybit linear-instruments snapshot |
-//! | `manifest.json` | per requested base: did it resolve to a Bybit perp, and its bar coverage |
+//! | `instruments.json` | the venue's linear-instruments snapshot |
+//! | `manifest.json` | per requested base: did it resolve to a perp on the venue, and its bar coverage |
 //!
 //! `CachedMarketData` turns a missing snapshot or bar file into a hard error
 //! naming `xsec fetch`, never an empty series — the [`MarketData`] contract

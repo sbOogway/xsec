@@ -1,12 +1,11 @@
-//! `xsec fetch`: fill the `data/` cache from Bybit.
+//! `xsec fetch`: fill the `data/<venue>/` cache from an [`ExchangeAdapter`].
 //!
-//! Orchestration only — the network lives in [`super::bybit`], the on-disk
-//! layout in [`super::cache`]. Downloads the linear-instruments list plus every
+//! Orchestration only — the network lives behind the adapter, the on-disk
+//! layout in [`super::cache`]. Downloads the venue's instrument list plus every
 //! `--universe` symbol's full daily-bar history, and writes `manifest.json`
-//! recording, per requested base, whether it resolved to a Bybit linear perp
+//! recording, per requested base, whether it resolved to a perp on the venue
 //! and its bar coverage. That manifest is the tradeability oracle the
-//! CoinMarketCap universe work (#32) reads. The only part of the binary that
-//! touches the network.
+//! CoinMarketCap universe work (#32) reads.
 
 use std::{collections::HashSet, path::Path};
 
@@ -15,7 +14,7 @@ use clap::Args;
 use nautilus_model::{identifiers::InstrumentId, instruments::Instrument};
 
 use crate::data::{
-    exchange::{bybit, cache, cache::ManifestEntry},
+    exchange::{ExchangeAdapter, cache, cache::ManifestEntry},
     universe::read_universe,
 };
 
@@ -56,28 +55,32 @@ impl FetchReport {
     }
 }
 
-/// Fetch instruments + bar history for the universe at `universe_path` into
-/// `data_dir`. A network failure for a single symbol is recorded and skipped;
-/// a failure fetching the instruments list aborts.
-pub fn run(universe_path: &Path, data_dir: &Path, args: &FetchArgs) -> Result<FetchReport> {
+/// Fetch instruments + bar history for the universe at `universe_path` from
+/// `adapter` into `data_dir`. A failure for a single symbol is recorded and
+/// skipped; a failure fetching the instruments list aborts.
+pub fn run(
+    adapter: &dyn ExchangeAdapter,
+    universe_path: &Path,
+    data_dir: &Path,
+    args: &FetchArgs,
+) -> Result<FetchReport> {
     let bases = read_universe(universe_path)?;
-    let rt = tokio::runtime::Runtime::new().context("tokio runtime for xsec fetch")?;
 
-    let instruments = rt
-        .block_on(bybit::fetch_linear_instruments())
-        .context("fetch Bybit linear instruments")?;
+    let instruments = adapter
+        .instruments()
+        .with_context(|| format!("fetch {} instruments", adapter.venue()))?;
     cache::write_instruments(data_dir, &instruments)?;
-    log::info!("cached {} Bybit linear instruments", instruments.len());
+    log::info!("cached {} {} instruments", instruments.len(), adapter.venue());
     let listed: HashSet<InstrumentId> = instruments.iter().map(|i| i.id()).collect();
 
     let mut report = FetchReport::default();
     let mut entries = Vec::with_capacity(bases.len());
 
     for base in &bases {
-        let id = bybit::linear_perp_id(base);
+        let id = adapter.perp_id(base);
 
         if !listed.contains(&id) {
-            log::warn!("{base}: no Bybit linear perp ({id}) — skipping");
+            log::warn!("{base}: no {} perp ({id}) — skipping", adapter.venue());
             report.unlisted.push(base.clone());
             entries.push(ManifestEntry {
                 base: base.clone(),
@@ -93,7 +96,8 @@ pub fn run(universe_path: &Path, data_dir: &Path, args: &FetchArgs) -> Result<Fe
 
         let networked = args.refresh || !cache::bars_are_fresh(data_dir, &id);
         let outcome = if networked {
-            rt.block_on(bybit::fetch_bars(id))
+            adapter
+                .bars(id)
                 .and_then(|bars| cache::write_bars(data_dir, &id, &bars).map(|()| bars))
         } else {
             cache::read_bars(data_dir, &id).map(Option::unwrap_or_default)
@@ -141,4 +145,140 @@ pub fn run(universe_path: &Path, data_dir: &Path, args: &FetchArgs) -> Result<Fe
     )?;
 
     Ok(report)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{collections::HashMap, io::Write, str::FromStr};
+
+    use nautilus_core::UnixNanos;
+    use nautilus_model::{
+        data::{Bar, BarType},
+        enums::CurrencyType,
+        identifiers::Symbol,
+        instruments::{CryptoPerpetual, InstrumentAny},
+        types::{Currency, Price, Quantity},
+    };
+    use tempfile::{NamedTempFile, tempdir};
+
+    use super::*;
+
+    /// An [`ExchangeAdapter`] with a fixed instrument list and bar history, no
+    /// network — `bars` errors for an id it has no history for.
+    struct FakeExchange {
+        instruments: Vec<InstrumentAny>,
+        bars: HashMap<InstrumentId, Vec<Bar>>,
+    }
+
+    impl ExchangeAdapter for FakeExchange {
+        fn venue(&self) -> &'static str {
+            "FAKE"
+        }
+        fn instruments(&self) -> Result<Vec<InstrumentAny>> {
+            Ok(self.instruments.clone())
+        }
+        fn perp_id(&self, base: &str) -> InstrumentId {
+            InstrumentId::from(format!("{base}USDT-LINEAR.FAKE").as_str())
+        }
+        fn bars(&self, id: InstrumentId) -> Result<Vec<Bar>> {
+            self.bars
+                .get(&id)
+                .cloned()
+                .ok_or_else(|| anyhow::anyhow!("no history for {id}"))
+        }
+    }
+
+    fn perp(base: &str) -> InstrumentAny {
+        InstrumentAny::CryptoPerpetual(CryptoPerpetual::new(
+            InstrumentId::from(format!("{base}USDT-LINEAR.FAKE").as_str()),
+            Symbol::from(format!("{base}USDT").as_str()),
+            Currency::new(base, 8, 0, base, CurrencyType::Crypto),
+            Currency::from("USDT"),
+            Currency::from("USDT"),
+            false,
+            2,
+            3,
+            Price::from("0.01"),
+            Quantity::from("0.001"),
+            None, None, None, None, None, None, None, None, None, None, None, None, None, None,
+            UnixNanos::default(),
+            UnixNanos::default(),
+        ))
+    }
+
+    fn bar_at(id: InstrumentId, ts_secs: u64) -> Bar {
+        let bt = BarType::from_str(&format!("{id}-1-DAY-LAST-EXTERNAL")).unwrap();
+        let px = Price::new(100.0, 2);
+        let ts = UnixNanos::from(ts_secs * 1_000_000_000);
+        Bar::new(bt, px, px, px, px, Quantity::new(1.0, 1), ts, ts)
+    }
+
+    fn universe(bases: &str) -> NamedTempFile {
+        let mut f = NamedTempFile::new().unwrap();
+        writeln!(f, "{bases}").unwrap();
+        f
+    }
+
+    fn manifest_status(data_dir: &Path, base: &str) -> String {
+        let m: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(cache::manifest_path(data_dir)).unwrap()).unwrap();
+        m["symbols"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|e| e["base"] == base)
+            .unwrap_or_else(|| panic!("no manifest row for {base}"))["status"]
+            .as_str()
+            .unwrap()
+            .to_string()
+    }
+
+    #[test]
+    fn run_classifies_listed_unlisted_and_failed_bases() {
+        let dir = tempdir().unwrap();
+        let uni = universe("BTC\nETH\nFOO");
+        let btc = InstrumentId::from("BTCUSDT-LINEAR.FAKE");
+
+        let adapter = FakeExchange {
+            instruments: vec![perp("BTC"), perp("ETH")], // FOO not listed
+            bars: HashMap::from([(btc, vec![bar_at(btc, 0), bar_at(btc, 86_400)])]), // ETH: no history
+        };
+
+        let report = run(&adapter, uni.path(), dir.path(), &FetchArgs { refresh: false }).unwrap();
+
+        assert_eq!(report.fetched, ["BTC"]);
+        assert_eq!(report.unlisted, ["FOO"]);
+        assert_eq!(report.failed.len(), 1);
+        assert_eq!(report.failed[0].0, "ETH");
+        assert!(report.cached.is_empty());
+
+        assert_eq!(manifest_status(dir.path(), "BTC"), "fetched");
+        assert_eq!(manifest_status(dir.path(), "ETH"), "failed");
+        assert_eq!(manifest_status(dir.path(), "FOO"), "unlisted");
+    }
+
+    #[test]
+    fn run_reuses_a_fresh_cache_and_refresh_forces_a_refetch() {
+        let dir = tempdir().unwrap();
+        let uni = universe("BTC");
+        let btc = InstrumentId::from("BTCUSDT-LINEAR.FAKE");
+
+        // Seed a cache whose last bar is ~now — fresh.
+        let now = chrono::Utc::now().timestamp() as u64;
+        cache::write_bars(dir.path(), &btc, &[bar_at(btc, now)]).unwrap();
+
+        // The adapter has no bar history, so it errors if asked — proving it isn't.
+        let adapter = FakeExchange {
+            instruments: vec![perp("BTC")],
+            bars: HashMap::new(),
+        };
+
+        let report = run(&adapter, uni.path(), dir.path(), &FetchArgs { refresh: false }).unwrap();
+        assert_eq!(report.cached, ["BTC"]);
+        assert!(report.fetched.is_empty() && report.failed.is_empty());
+
+        // `--refresh` bypasses the freshness check and hits the (failing) adapter.
+        let report = run(&adapter, uni.path(), dir.path(), &FetchArgs { refresh: true }).unwrap();
+        assert_eq!(report.failed.len(), 1);
+    }
 }

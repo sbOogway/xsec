@@ -41,6 +41,7 @@ fn capture_writes_the_contract_for_a_weekly_cadence() {
     let cfg = RunConfig {
         run_id: run_id.to_string(),
         strategy: "momentum".to_string(),
+        exchange: "bybit".to_string(),
         date_start: "2026-01-01".to_string(),
         date_end: "2026-02-01".to_string(),
         bases: vec!["BTC".to_string()],
@@ -125,6 +126,7 @@ fn capture_writes_the_contract_for_a_weekly_cadence() {
         .collect();
     assert_eq!(cfg_map["run_id"], run_id);
     assert_eq!(cfg_map["strategy"], "momentum");
+    assert_eq!(cfg_map["exchange"], "bybit");
     assert_eq!(cfg_map["bases"], "BTC");
     assert_eq!(cfg_map["universe_path"], "universe.txt");
     assert_eq!(cfg_map["argv"], "xsec --uuid test-0001-weekly");
@@ -188,6 +190,7 @@ fn capture_writes_the_contract_for_a_carried_book() {
     let cfg = RunConfig {
         run_id: run_id.to_string(),
         strategy: "top5_momentum_filtered".to_string(),
+        exchange: "bybit".to_string(),
         date_start: "2026-01-01".to_string(),
         date_end: "2026-04-01".to_string(),
         bases: vec!["AAA".to_string(), "BBB".to_string(), "CCC".to_string()],
@@ -308,6 +311,7 @@ fn capture_writes_the_contract_for_a_side_flip() {
     let cfg = RunConfig {
         run_id: run_id.to_string(),
         strategy: "momentum".to_string(),
+        exchange: "bybit".to_string(),
         date_start: "2026-01-01".to_string(),
         date_end: "2026-04-01".to_string(),
         bases: vec!["XXX".to_string()],

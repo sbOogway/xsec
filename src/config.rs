@@ -21,7 +21,7 @@ use nautilus_core::UnixNanos;
 use nautilus_model::types::Money;
 use uuid::Uuid;
 
-use crate::data::universe::read_universe;
+use crate::data::{exchange::Exchange, universe::read_universe};
 
 /// The run-level flags shared by every strategy. Flattened into the binary's
 /// top-level parser alongside the strategy subcommand; every field is `global`
@@ -37,6 +37,11 @@ pub struct SharedArgs {
     /// are ignored.
     #[arg(long, global = true, default_value = "universe.txt")]
     pub universe: PathBuf,
+
+    /// Exchange to fetch from / backtest against; its cache lives under
+    /// `data/<exchange>/`.
+    #[arg(long, global = true, value_enum, default_value_t = Exchange::Bybit)]
+    pub exchange: Exchange,
 
     /// Starting balance for the simulated account. Must be USDT.
     #[arg(long, global = true, default_value = "1_000 USDT")]
@@ -60,6 +65,8 @@ pub struct RunConfig {
     /// The strategy subcommand name (`momentum`), recorded in
     /// `config.csv` and used by `analysis/` to label a run.
     pub strategy: String,
+    /// The exchange this run's data comes from (`bybit`).
+    pub exchange: String,
     pub date_start: String,
     pub date_end: String,
     pub starting_balance: String,
@@ -101,6 +108,7 @@ pub fn build_config(args: &SharedArgs, argv: &[String], strategy: &str) -> Resul
     Ok(RunConfig {
         run_id: args.uuid.clone().unwrap_or_else(|| Uuid::now_v7().to_string()),
         strategy: strategy.to_string(),
+        exchange: args.exchange.as_str().to_string(),
         date_start: args.date_start.trim().to_string(),
         date_end: args.date_end.trim().to_string(),
         bases,
@@ -156,12 +164,33 @@ mod tests {
         let cfg = build_config(&shared(uni.path(), &[]), &[], "momentum").unwrap();
 
         assert_eq!(cfg.strategy, "momentum");
+        assert_eq!(cfg.exchange, "bybit");
         assert_eq!(cfg.starting_balance, "1_000 USDT");
         assert_eq!(cfg.date_start, "2020-01-01");
         assert_eq!(cfg.date_end, "2026-09-02");
         assert_eq!(cfg.bases.len(), 20);
         // A fresh UUID-7 when --uuid is absent.
         assert_eq!(cfg.run_id.len(), 36);
+    }
+
+    #[test]
+    fn exchange_flag_flows_through() {
+        let uni = universe_file(20);
+        let cfg = build_config(&shared(uni.path(), &["--exchange", "bybit"]), &[], "momentum").unwrap();
+        assert_eq!(cfg.exchange, "bybit");
+    }
+
+    #[test]
+    fn unknown_exchange_is_rejected() {
+        #[derive(Parser)]
+        struct Wrap {
+            #[command(flatten)]
+            shared: SharedArgs,
+        }
+        match Wrap::try_parse_from(["xsec", "--exchange", "kraken"]) {
+            Err(e) => assert_eq!(e.kind(), clap::error::ErrorKind::InvalidValue),
+            Ok(_) => panic!("unknown --exchange should be rejected"),
+        }
     }
 
     #[test]

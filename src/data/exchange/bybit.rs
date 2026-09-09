@@ -1,9 +1,8 @@
-//! Bybit HTTP: bar-type construction and the shared client that fetches
-//! linear-perp instruments and daily bar history.
-//!
-//! No disk — the on-disk cache layout lives in [`super::cache`], and `xsec fetch`
-//! ([`super::fetch`]) is what drives this module to fill it. [`get_bar_type`] is
-//! also used by the rebalance runtime in [`crate::strategy::common`].
+//! Bybit: the [`BybitAdapter`] `xsec fetch` pulls from, over a shared HTTP
+//! client. [`get_bar_type`] is public because the rebalance runtime in
+//! [`crate::strategy::common`] also builds bar types; everything else here is
+//! the adapter's own plumbing. No disk — the cache layout lives in
+//! [`super::cache`].
 
 use std::sync::OnceLock;
 
@@ -16,6 +15,8 @@ use nautilus_model::{
     instruments::InstrumentAny,
 };
 
+use crate::data::exchange::ExchangeAdapter;
+
 /// The external daily [`BarType`] for `instrument_id` at `aggregation`.
 pub fn get_bar_type(instrument_id: InstrumentId, aggregation: BarAggregation) -> BarType {
     BarType::new(
@@ -25,16 +26,43 @@ pub fn get_bar_type(instrument_id: InstrumentId, aggregation: BarAggregation) ->
     )
 }
 
-/// The Bybit linear-perp instrument id for a base asset
-/// (`BTC` → `BTCUSDT-LINEAR.BYBIT`).
-pub fn linear_perp_id(base: &str) -> InstrumentId {
-    InstrumentId::from(format!("{base}USDT-LINEAR.BYBIT").as_str())
+/// The Bybit [`ExchangeAdapter`]: the HTTP calls below, plus a Tokio runtime so
+/// [`fetch::run`](super::fetch::run) can stay synchronous.
+pub struct BybitAdapter {
+    rt: tokio::runtime::Runtime,
+}
+
+impl BybitAdapter {
+    /// Create the adapter and its Tokio runtime.
+    pub fn new() -> Result<Self> {
+        Ok(Self {
+            rt: tokio::runtime::Runtime::new().context("tokio runtime for BybitAdapter")?,
+        })
+    }
+}
+
+impl ExchangeAdapter for BybitAdapter {
+    fn venue(&self) -> &'static str {
+        "BYBIT"
+    }
+
+    fn instruments(&self) -> Result<Vec<InstrumentAny>> {
+        self.rt.block_on(fetch_linear_instruments())
+    }
+
+    fn perp_id(&self, base: &str) -> InstrumentId {
+        InstrumentId::from(format!("{base}USDT-LINEAR.BYBIT").as_str())
+    }
+
+    fn bars(&self, instrument_id: InstrumentId) -> Result<Vec<Bar>> {
+        self.rt.block_on(fetch_bars(instrument_id))
+    }
 }
 
 /// Fetch every Bybit linear instrument and seed the shared client's cache, so
-/// the per-symbol [`fetch_bars`] calls can resolve symbols without re-requesting
-/// the list.
-pub async fn fetch_linear_instruments() -> Result<Vec<InstrumentAny>> {
+/// the per-symbol [`fetch_bars`] calls resolve symbols without re-requesting the
+/// list.
+async fn fetch_linear_instruments() -> Result<Vec<InstrumentAny>> {
     let client = shared_client();
     let instruments = client
         .request_instruments(BybitProductType::Linear, None, None)
@@ -47,7 +75,7 @@ pub async fn fetch_linear_instruments() -> Result<Vec<InstrumentAny>> {
 /// Fetch the full daily-bar history for `instrument_id`. Requires
 /// [`fetch_linear_instruments`] to have run first so the shared client can
 /// resolve the symbol.
-pub async fn fetch_bars(instrument_id: InstrumentId) -> Result<Vec<Bar>> {
+async fn fetch_bars(instrument_id: InstrumentId) -> Result<Vec<Bar>> {
     let bar_type = get_bar_type(instrument_id, BarAggregation::Day);
     let bars = shared_client()
         .request_bars(BybitProductType::Linear, bar_type, None, None, None, true)
@@ -73,9 +101,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn linear_perp_id_builds_the_bybit_usdt_perp() {
+    fn adapter_venue_and_perp_id() {
+        let adapter = BybitAdapter::new().unwrap();
+        assert_eq!(adapter.venue(), "BYBIT");
         assert_eq!(
-            linear_perp_id("BTC"),
+            adapter.perp_id("BTC"),
             InstrumentId::from("BTCUSDT-LINEAR.BYBIT"),
         );
     }
@@ -83,9 +113,6 @@ mod tests {
     #[test]
     fn get_bar_type_is_one_day_last_external() {
         let bar_type = get_bar_type(InstrumentId::from("BTCUSDT-LINEAR.BYBIT"), BarAggregation::Day);
-        assert_eq!(
-            bar_type.to_string(),
-            "BTCUSDT-LINEAR.BYBIT-1-DAY-LAST-EXTERNAL",
-        );
+        assert_eq!(bar_type.to_string(), "BTCUSDT-LINEAR.BYBIT-1-DAY-LAST-EXTERNAL");
     }
 }
