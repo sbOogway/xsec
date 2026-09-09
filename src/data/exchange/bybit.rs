@@ -67,3 +67,25 @@ fn shared_client() -> BybitHttpClient {
     static CLIENT: OnceLock<BybitHttpClient> = OnceLock::new();
     CLIENT.get_or_init(BybitHttpClient::default).clone()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn linear_perp_id_builds_the_bybit_usdt_perp() {
+        assert_eq!(
+            linear_perp_id("BTC"),
+            InstrumentId::from("BTCUSDT-LINEAR.BYBIT"),
+        );
+    }
+
+    #[test]
+    fn get_bar_type_is_one_day_last_external() {
+        let bar_type = get_bar_type(InstrumentId::from("BTCUSDT-LINEAR.BYBIT"), BarAggregation::Day);
+        assert_eq!(
+            bar_type.to_string(),
+            "BTCUSDT-LINEAR.BYBIT-1-DAY-LAST-EXTERNAL",
+        );
+    }
+}

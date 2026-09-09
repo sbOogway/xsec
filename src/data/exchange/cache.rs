@@ -264,3 +264,159 @@ fn write_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
     fs::rename(&tmp, path).with_context(|| format!("rename to {}", path.display()))?;
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use std::str::FromStr;
+
+    use nautilus_core::UnixNanos;
+    use nautilus_model::{
+        data::BarType,
+        enums::CurrencyType,
+        identifiers::Symbol,
+        instruments::{CryptoPerpetual, Instrument},
+        types::{Price, Quantity},
+    };
+    use tempfile::tempdir;
+
+    use super::*;
+
+    fn btc_id() -> InstrumentId {
+        InstrumentId::from("BTCUSDT-LINEAR.BYBIT")
+    }
+
+    /// A daily bar whose `ts_event` is `secs` past the epoch (all prices flat).
+    fn bar_at(secs: i64) -> Bar {
+        let bt = BarType::from_str("BTCUSDT-LINEAR.BYBIT-1-DAY-LAST-EXTERNAL").unwrap();
+        let px = Price::new(100.0, 2);
+        let ts = UnixNanos::from(secs as u64 * 1_000_000_000);
+        Bar::new(bt, px, px, px, px, Quantity::new(1.0, 1), ts, ts)
+    }
+
+    /// A minimal Bybit linear perp for `base` — every optional field `None`, and
+    /// the base currency built (not registered) so a snapshot round-trip has to
+    /// go through [`prime_currencies`] to decode it.
+    fn perp_with_base(base: &str) -> InstrumentAny {
+        InstrumentAny::CryptoPerpetual(CryptoPerpetual::new(
+            InstrumentId::from(format!("{base}USDT-LINEAR.BYBIT").as_str()),
+            Symbol::from(format!("{base}USDT").as_str()),
+            Currency::new(base, 8, 0, base, CurrencyType::Crypto),
+            Currency::from("USDT"),
+            Currency::from("USDT"),
+            false,
+            2,
+            3,
+            Price::from("0.01"),
+            Quantity::from("0.001"),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            UnixNanos::default(),
+            UnixNanos::default(),
+        ))
+    }
+
+    #[test]
+    fn bar_path_strips_the_venue_and_tags_the_timeframe() {
+        assert_eq!(
+            bar_path(Path::new("data"), &btc_id()),
+            Path::new("data/BTCUSDT_1d.msgpack"),
+        );
+        // A symbol with no venue segment falls back to the whole symbol.
+        assert_eq!(
+            bar_path(Path::new("data"), &InstrumentId::from("FOO.BYBIT")),
+            Path::new("data/FOO_1d.msgpack"),
+        );
+    }
+
+    #[test]
+    fn bars_are_fresh_tracks_the_last_bar_age() {
+        let dir = tempdir().unwrap();
+        let id = btc_id();
+        let now = Utc::now().timestamp();
+
+        assert!(!bars_are_fresh(dir.path(), &id), "no file");
+
+        write_bars(dir.path(), &id, &[]).unwrap();
+        assert!(!bars_are_fresh(dir.path(), &id), "empty series");
+
+        write_bars(dir.path(), &id, &[bar_at(now - 3600)]).unwrap();
+        assert!(bars_are_fresh(dir.path(), &id), "last bar 1h old");
+
+        write_bars(dir.path(), &id, &[bar_at(now - 48 * 3600)]).unwrap();
+        assert!(!bars_are_fresh(dir.path(), &id), "last bar 48h old");
+    }
+
+    #[test]
+    fn read_instruments_primes_an_unregistered_base_currency() {
+        let dir = tempdir().unwrap();
+        write_instruments(dir.path(), &[perp_with_base("XQZ777")]).unwrap();
+
+        let got = read_instruments(dir.path())
+            .expect("prime_currencies registers XQZ777 before the strict decode");
+        assert_eq!(got.len(), 1);
+        assert_eq!(got[0].base_currency().unwrap().code.as_str(), "XQZ777");
+    }
+
+    #[test]
+    fn write_manifest_round_trips_the_schema() {
+        let dir = tempdir().unwrap();
+        let entries = vec![
+            ManifestEntry {
+                base: "BTC".to_string(),
+                instrument_id: Some("BTCUSDT-LINEAR.BYBIT".to_string()),
+                status: "fetched",
+                bars: 100,
+                first_bar: Some("2020-01-01".to_string()),
+                last_bar: Some("2026-01-01".to_string()),
+                error: None,
+            },
+            ManifestEntry {
+                base: "FOO".to_string(),
+                instrument_id: None,
+                status: "unlisted",
+                bars: 0,
+                first_bar: None,
+                last_bar: None,
+                error: None,
+            },
+        ];
+        write_manifest(dir.path(), "universe.txt", 862, &entries).unwrap();
+
+        let text = fs::read_to_string(manifest_path(dir.path())).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&text).unwrap();
+        assert_eq!(v["universe"], "universe.txt");
+        assert_eq!(v["instruments"], 862);
+        assert!(v["generated_at"].as_str().unwrap().ends_with('Z'));
+        assert_eq!(v["symbols"][0]["base"], "BTC");
+        assert_eq!(v["symbols"][0]["status"], "fetched");
+        assert_eq!(v["symbols"][0]["bars"], 100);
+        assert!(
+            v["symbols"][0].get("error").is_none(),
+            "error is skipped when None"
+        );
+        assert_eq!(v["symbols"][1]["instrument_id"], serde_json::Value::Null);
+    }
+
+    #[test]
+    fn bar_dates_formats_utc_days() {
+        // 2021-03-16T00:00:00Z, then +1 day.
+        let bars = [bar_at(1_615_852_800), bar_at(1_615_939_200)];
+        assert_eq!(
+            ManifestEntry::bar_dates(&bars),
+            (Some("2021-03-16".to_string()), Some("2021-03-17".to_string())),
+        );
+        assert_eq!(ManifestEntry::bar_dates(&[]), (None, None));
+    }
+}
