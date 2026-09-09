@@ -27,7 +27,8 @@ pub struct FetchArgs {
     pub refresh: bool,
 }
 
-/// What a fetch run did, for the stdout summary.
+/// What a fetch run did — returned for the caller and for tests; the summary is
+/// logged via [`log_summary`](Self::log_summary).
 #[derive(Debug, Default)]
 pub struct FetchReport {
     /// Bases that hit the Bybit network this run.
@@ -41,21 +42,17 @@ pub struct FetchReport {
 }
 
 impl FetchReport {
-    /// One-line count plus the unlisted / failed detail.
-    pub fn print_summary(&self) {
-        println!(
+    /// Log the one-line outcome at `info`. The per-base detail (which coins were
+    /// unlisted, which failed and why) is already logged as it happens in
+    /// [`run`].
+    pub fn log_summary(&self) {
+        log::info!(
             "fetch: {} fetched, {} cached, {} unlisted, {} failed",
             self.fetched.len(),
             self.cached.len(),
             self.unlisted.len(),
             self.failed.len(),
         );
-        if !self.unlisted.is_empty() {
-            println!("  no Bybit linear perp: {}", self.unlisted.join(" "));
-        }
-        for (base, err) in &self.failed {
-            println!("  failed {base}: {err}");
-        }
     }
 }
 

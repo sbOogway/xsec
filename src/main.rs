@@ -70,7 +70,7 @@ fn main() -> anyhow::Result<()> {
     match &cli.command {
         Command::Fetch(args) => {
             let report = fetch::run(&cli.shared.universe, Path::new(DATA_DIR), args)?;
-            report.print_summary();
+            report.log_summary();
         }
         Command::Strategy(strategy) => match strategy {
             StrategyKind::Momentum(args) => {
