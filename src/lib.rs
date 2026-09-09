@@ -13,8 +13,10 @@
 //!   [`data::exchange::CachedMarketData`], in [`data::exchange::cache`]);
 //!   [`data::exchange::ExchangeAdapter`] is what `xsec fetch`
 //!   ([`data::exchange::fetch`]) pulls from ([`data::exchange::bybit`] is the
-//!   first impl). Plus the [`universe`](data::universe) file reader and
-//!   run-artifact [`capture`](data::backtest).
+//!   first impl). Plus [`data::snapshot::SnapshotData`] (the `coins/cmc/`
+//!   ranking that gates `momentum --source coinmarketcap`), the
+//!   [`universe`](data::universe) file reader and run-artifact
+//!   [`capture`](data::backtest).
 //! * [`engine`] — the backtest bootstrap: `RunConfig` + `MarketData` + strategy
 //!   into a wired [`BacktestEngine`](engine::build_backtest_engine), then run.
 //! * [`config`] and [`period`] — the shared run flags / resolved config and the

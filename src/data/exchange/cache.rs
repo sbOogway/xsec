@@ -20,6 +20,7 @@
 //! pre-registers every currency code before the real decode.
 
 use std::{
+    collections::HashSet,
     fs,
     io::ErrorKind,
     path::{Path, PathBuf},
@@ -232,6 +233,32 @@ struct Manifest<'a> {
     universe: &'a str,
     instruments: usize,
     symbols: &'a [ManifestEntry],
+}
+
+/// The Bybit base coins the manifest at `data_dir` has usable bars for
+/// (`status` `fetched` or `cached`) — the tradeability filter
+/// `momentum --source coinmarketcap` applies to a CoinMarketCap ranking.
+/// Errors naming `xsec fetch` if there is no manifest.
+pub fn read_manifest_bases(data_dir: &Path) -> Result<HashSet<String>> {
+    let path = manifest_path(data_dir);
+    let bytes = fs::read(&path).with_context(|| {
+        format!(
+            "no fetch manifest at {} — run `xsec fetch --universe <file>` first",
+            path.display()
+        )
+    })?;
+    let manifest: serde_json::Value =
+        serde_json::from_slice(&bytes).with_context(|| format!("parse {}", path.display()))?;
+    let bases = manifest["symbols"]
+        .as_array()
+        .map(|rows| {
+            rows.iter()
+                .filter(|row| matches!(row["status"].as_str(), Some("fetched" | "cached")))
+                .filter_map(|row| row["base"].as_str().map(str::to_string))
+                .collect()
+        })
+        .unwrap_or_default();
+    Ok(bases)
 }
 
 /// Write `manifest.json`.

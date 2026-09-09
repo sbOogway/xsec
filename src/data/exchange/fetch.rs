@@ -75,12 +75,14 @@ pub fn run(
 
     let mut report = FetchReport::default();
     let mut entries = Vec::with_capacity(bases.len());
+    let total = bases.len();
 
-    for base in &bases {
+    for (i, base) in bases.iter().enumerate() {
+        let n = i + 1;
         let id = adapter.perp_id(base);
 
         if !listed.contains(&id) {
-            log::warn!("{base}: no {} perp ({id}) — skipping", adapter.venue());
+            log::warn!("[{n}/{total}] {base}: no {} perp ({id}) — skipping", adapter.venue());
             report.unlisted.push(base.clone());
             entries.push(ManifestEntry {
                 base: base.clone(),
@@ -111,6 +113,13 @@ pub fn run(
                     report.cached.push(base.clone());
                 }
                 let (first_bar, last_bar) = ManifestEntry::bar_dates(&bars);
+                log::info!(
+                    "[{n}/{total}] {base}: {} {} bars {}..{}",
+                    if networked { "fetched" } else { "cached" },
+                    bars.len(),
+                    first_bar.as_deref().unwrap_or("-"),
+                    last_bar.as_deref().unwrap_or("-"),
+                );
                 entries.push(ManifestEntry {
                     base: base.clone(),
                     instrument_id: Some(id.to_string()),
@@ -122,7 +131,7 @@ pub fn run(
                 });
             }
             Err(e) => {
-                log::error!("{base}: fetch failed: {e:#}");
+                log::error!("[{n}/{total}] {base}: fetch failed: {e:#}");
                 report.failed.push((base.clone(), format!("{e:#}")));
                 entries.push(ManifestEntry {
                     base: base.clone(),

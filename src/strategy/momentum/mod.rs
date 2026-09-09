@@ -13,5 +13,5 @@
 pub mod config;
 pub mod strategy;
 
-pub use config::{Args, Config};
-pub use strategy::Momentum;
+pub use config::{Args, Config, Source};
+pub use strategy::{CmcGate, Momentum};

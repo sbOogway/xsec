@@ -5,7 +5,7 @@
 //! Driving it with an [`InMemoryMarketData`] fixture proves the wiring works
 //! with no Bybit HTTP call, which `run_engine` in `src/main.rs` could never do.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 use nautilus_core::UnixNanos;
 use nautilus_model::{
@@ -18,9 +18,12 @@ use nautilus_model::{
 
 use xsec::{
     config::RunConfig,
-    data::exchange::{CachedMarketData, InMemoryMarketData, MarketData, bybit::get_bar_type, cache},
+    data::{
+        exchange::{CachedMarketData, InMemoryMarketData, MarketData, bybit::get_bar_type, cache},
+        snapshot::{InMemorySnapshotData, SnapshotRow},
+    },
     engine,
-    strategy::momentum::{Momentum, config as momentum},
+    strategy::momentum::{CmcGate, Momentum, config as momentum},
 };
 
 /// A minimal Bybit linear-perp instrument for `base` (`BTC` →
@@ -134,6 +137,66 @@ fn build_backtest_engine_wires_a_fixture_market_without_network() {
         vec![Venue::from("BYBIT")],
         "the strategy's own venue is the one added to the engine",
     );
+}
+
+/// A `--source coinmarketcap` bootstrap: the strategy carries a [`CmcGate`] over
+/// fixture snapshots + a fixture resolution map, the derived universe's bars
+/// come from an [`InMemoryMarketData`], and the whole thing wires with no
+/// network. The gate's per-rebalance logic is unit-tested in
+/// `src/strategy/momentum/strategy.rs`; this proves the wiring.
+#[test]
+fn build_backtest_engine_wires_a_cmc_gated_momentum_run() {
+    let bases: Vec<String> = ["BTC", "ETH", "SOL"].iter().map(|s| s.to_string()).collect();
+    let instrument_ids = momentum::instrument_ids(&bases);
+
+    let instruments: Vec<InstrumentAny> = bases.iter().map(|b| perp(b)).collect();
+    let bars: HashMap<InstrumentId, Vec<Bar>> = instrument_ids
+        .iter()
+        .map(|id| (*id, daily_bars(*id, 40)))
+        .collect();
+    let market = InMemoryMarketData::new(instruments, bars);
+
+    let snapshots = InMemorySnapshotData::new(BTreeMap::from([(
+        chrono::NaiveDate::from_ymd_opt(2024, 1, 7).unwrap(),
+        vec![
+            SnapshotRow { rank: 1, cmc_id: 1, cmc_symbol: "BTC".into() },
+            SnapshotRow { rank: 2, cmc_id: 1027, cmc_symbol: "ETH".into() },
+            SnapshotRow { rank: 3, cmc_id: 5426, cmc_symbol: "SOL".into() },
+        ],
+    )]));
+    let resolution = tempfile::NamedTempFile::new().unwrap();
+    std::fs::write(
+        resolution.path(),
+        "cmc_symbol,bybit_base,status\nBTC,BTC,listed\nETH,ETH,listed\nSOL,SOL,listed\n",
+    )
+    .unwrap();
+    let gate = CmcGate::new(
+        Box::new(snapshots),
+        xsec::data::snapshot::cmc::Resolution::open(resolution.path()).unwrap(),
+    );
+
+    let run = RunConfig {
+        run_id: "test-engine-boot-cmc".to_string(),
+        strategy: "momentum".to_string(),
+        exchange: "bybit".to_string(),
+        date_start: "2024-01-01".to_string(),
+        date_end: "2024-03-01".to_string(),
+        bases: bases.clone(),
+        starting_balance: "1000 USDT".to_string(),
+        universe_path: "<derived: coinmarketcap>".to_string(),
+        argv: "xsec momentum --source coinmarketcap".to_string(),
+    };
+
+    let strategy = Momentum::builder()
+        .run(run.clone())
+        .config(momentum_config(&bases))
+        .maybe_cmc(Some(gate))
+        .build();
+
+    let engine = engine::build_backtest_engine(&run, &market, &instrument_ids, strategy)
+        .expect("cmc-gated momentum wires over in-memory data, no network");
+
+    assert_eq!(engine.list_venues(), vec![Venue::from("BYBIT")]);
 }
 
 /// `CachedMarketData` reads back exactly what `xsec fetch` writes: the

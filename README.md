@@ -77,27 +77,31 @@ lists the subcommands — `fetch` (see above) and the strategies (one strategy,
 
 | Flag | Default | What it does |
 | --- | --- | --- |
-| `--fast-days <n>`             | `1`   | fast-momentum lookback, in daily bars |
-| `--medium-days <n>`           | `3`   | medium-momentum lookback, in daily bars |
-| `--slow-days <n>`             | `7`   | slow-momentum lookback, in daily bars |
+| `--fast-days <n>`             | `7`   | fast-momentum lookback, in daily bars |
+| `--medium-days <n>`           | `30`  | medium-momentum lookback, in daily bars |
+| `--slow-days <n>`             | `30`  | slow-momentum lookback, in daily bars |
 | `--fast-weight <w>`           | `0.3` | weight on fast momentum in the composite score |
 | `--medium-weight <w>`         | `0.0` | weight on medium momentum in the composite score |
 | `--slow-weight <w>`           | `0.7` | weight on slow momentum in the composite score |
 | `--top-n <n>`                 | `5`   | number of names held long at a time (top of the score) |
 | `--short-n <n>`               | `5`   | number of names held short (bottom of the score); `0` = long-only |
-| `--long-w <w>`                | `0.5` | share of the gross budget on the long side (`0.5` = dollar-neutral); ignored when `--short-n 0` |
-| `--regime-lookback-days <n>`  | `20`  | BTC trailing-return window for the regime filter |
+| `--long-short-balance <w>`    | `0.5` | share of the gross budget on the long side (`0.5` = dollar-neutral); ignored when `--short-n 0` |
+| `--regime-lookback-days <n>`  | `30`  | BTC trailing-return window for the regime filter |
 | `--regime-filter <bool>`      | `false` | flatten the whole book to cash on a negative BTC trend; needs `BTC` in the universe when on |
-| `--risk-fraction <r>`         | `0.8` | gross exposure as a fraction of account equity, per rebalance |
+| `--risk-fraction <r>`         | `1.0` | gross exposure as a fraction of account equity, per rebalance |
 | `--allocation-tilt <t>`       | `0.0` | within-side lean toward higher-conviction names (`0` = equal weight) |
 | `--holding-period <unit>`     | `day` | rebalance clock unit: `day`, `iso-week` or `month` |
-| `--number-holding-periods <n>`| `1`   | `--holding-period` units between re-ranks (each re-rank trades only the top-/bottom-`n` delta; survivors ride) |
+| `--number-holding-periods <n>`| `7`   | `--holding-period` units between re-ranks (each re-rank trades only the top-/bottom-`n` delta; survivors ride) |
+| `--source <src>`              | `bybit` | `bybit` ranks the fixed `--universe`; `coinmarketcap` gates the eligible-to-hold set each rebalance by CoinMarketCap's historical top-N by market cap as of that date (see below) |
+| `--cmc-snapshots <dir>`       | `coins/cmc` | `[--source coinmarketcap]` the snapshot directory |
+| `--cmc-top-n <n>`             | `200` | `[--source coinmarketcap]` snapshot depth that counts as "in the top-N" (`200` = the whole snapshot); must be ≥ `--top-n + --short-n` |
 
 Invalid combinations are rejected before the engine boots (e.g. `--top-n` +
 `--short-n` larger than the universe, `--regime-filter true` with no `BTC` in
-the universe, all three score weights `0`, `--long-w` outside `[0, 1]`,
-`--date-start` after `--date-end`, a non-USDT balance). The resolved values —
-and the exact command line — are written to `runs/<UUID>/config.csv`.
+the universe, all three score weights `0`, `--long-short-balance` outside `[0, 1]`,
+`--date-start` after `--date-end`, a non-USDT balance, `--cmc-top-n` below
+`--top-n + --short-n`). The resolved values — and the exact command line — are
+written to `runs/<UUID>/config.csv`.
 
 Through `make`, pass strategy flags with `ARGS`:
 
@@ -122,8 +126,29 @@ daily market-cap rankings into `coins/cmc/<YYYYMMDD>.csv`, one file per day, no
 API key (a regenerable local cache, gitignored like `data/`; ~2,400 files for
 the 2020-onwards default). `make universe_cmc_union` then flattens a date range
 of those into one committed universe file — the union of every base asset that
-was ever top-N, annotated against Bybit, ready for `--universe` (and the input
-to a future `momentum --source coinmarketcap`).
+was ever top-N, annotated against Bybit — and `make cmc_resolution` writes the
+committed `coins/cmc_resolution.csv` symbol map (raw CMC ticker → Bybit base).
+
+### `momentum --source coinmarketcap`
+
+Instead of ranking a fixed `--universe`, gate the book each rebalance to
+CoinMarketCap's historical top-`--cmc-top-n` by market cap **as of that date**
+— a point-in-time universe that rebalances as coins enter and leave the
+ranking. The momentum score is unchanged (still the composite over Bybit daily
+closes); CoinMarketCap only decides which names are eligible to hold. A coin
+CMC ranks that has no Bybit perp, or no candle yet at that date, is ignored.
+
+```sh
+make universe_cmc_union                     # -> coins/cmc_union_*.txt + coins/cmc_resolution.csv
+make fetch UNIVERSE=coins/cmc_union_<...>.txt
+cargo run --bin xsec -- momentum --source coinmarketcap
+make tearsheet ARGS="--source coinmarketcap --number-holding-periods 7"   # weekly re-rank
+```
+
+`--universe` is ignored for selection — the traded set is derived from the
+snapshots ∩ `coins/cmc_resolution.csv` ∩ the fetch manifest. Each run also
+writes `runs/<UUID>/cmc_selection.csv`: the rank-ordered eligible set and its
+long/short/none side, per rebalance.
 
 ## Parameter search
 

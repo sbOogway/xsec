@@ -7,19 +7,26 @@ use nautilus_model::identifiers::InstrumentId;
 
 use xsec::{
     config::{self, RunConfig, SharedArgs},
-    data::exchange::{
-        CachedMarketData, Exchange, ExchangeAdapter,
-        bybit::BybitAdapter,
-        cache::DATA_DIR,
-        fetch::{self, FetchArgs},
+    data::{
+        exchange::{
+            CachedMarketData, Exchange, ExchangeAdapter,
+            bybit::BybitAdapter,
+            cache::{self, DATA_DIR},
+            fetch::{self, FetchArgs},
+        },
+        snapshot::cmc::{CmcSnapshotData, Resolution, derive_universe},
+        universe::read_universe,
     },
     engine,
     strategy::{
         StrategyKind,
         common::StrategyRuntime,
-        momentum::{Momentum, config as momentum},
+        momentum::{CmcGate, Momentum, Source, config as momentum},
     },
 };
+
+/// The committed CMC→Bybit resolution map (`make cmc_resolution`).
+const CMC_RESOLUTION_PATH: &str = "coins/cmc_resolution.csv";
 
 /// Cross-sectional strategy backtests over USDT-margined linear perpetuals.
 ///
@@ -63,6 +70,16 @@ fn adapter_for(exchange: Exchange) -> anyhow::Result<Box<dyn ExchangeAdapter>> {
     }
 }
 
+/// The backtest window as `NaiveDate`s, for the `--source coinmarketcap`
+/// universe derivation ([`SharedArgs`] keeps the raw `YYYY-MM-DD` strings).
+fn window_dates(shared: &SharedArgs) -> anyhow::Result<(chrono::NaiveDate, chrono::NaiveDate)> {
+    let parse = |s: &str| {
+        chrono::NaiveDate::parse_from_str(s.trim(), "%Y-%m-%d")
+            .map_err(|e| anyhow::anyhow!("date {s:?}: {e}"))
+    };
+    Ok((parse(&shared.date_start)?, parse(&shared.date_end)?))
+}
+
 /// Which runtime to boot. The `Backtest` path is the one that is wired end to
 /// end; `Live` is a thin sketch and `Sandbox` is unimplemented. Everything else
 /// is configured per run through [`CliArgs`] and the chosen strategy's config.
@@ -83,7 +100,52 @@ fn main() -> anyhow::Result<()> {
         }
         Command::Strategy(strategy) => match strategy {
             StrategyKind::Momentum(args) => {
-                let run = config::build_config(&cli.shared, &argv, strategy.name())?;
+                // `--source bybit` reads `--universe`; `--source coinmarketcap`
+                // derives its traded set from the snapshots and carries a gate
+                // that narrows the scored set each rebalance.
+                let (bases, universe_path, cmc) = match args.source {
+                    Source::Bybit => (
+                        read_universe(&cli.shared.universe)?,
+                        cli.shared.universe.display().to_string(),
+                        None,
+                    ),
+                    Source::Coinmarketcap => {
+                        let snapshots = CmcSnapshotData::open(&args.cmc_snapshots)?;
+                        let resolution = Resolution::open(Path::new(CMC_RESOLUTION_PATH))?;
+                        let listed = cache::read_manifest_bases(&data_dir)?;
+                        let (start, end) = window_dates(&cli.shared)?;
+                        let bases = derive_universe(
+                            &snapshots,
+                            &resolution,
+                            &listed,
+                            start,
+                            end,
+                            args.cmc_top_n,
+                        );
+                        anyhow::ensure!(
+                            !bases.is_empty(),
+                            "no CoinMarketCap top-{} coin in [{}, {}] resolved to a Bybit perp \
+                             with fetched bars — run \
+                             `xsec fetch --universe <coins/cmc_union_*.txt>` first",
+                            args.cmc_top_n,
+                            cli.shared.date_start,
+                            cli.shared.date_end,
+                        );
+                        (
+                            bases,
+                            "<derived: coinmarketcap>".to_string(),
+                            Some(CmcGate::new(Box::new(snapshots), resolution)),
+                        )
+                    }
+                };
+
+                let run = config::build_config_with_bases(
+                    &cli.shared,
+                    &argv,
+                    strategy.name(),
+                    bases,
+                    universe_path,
+                )?;
                 let strategy_config = momentum::build(args, &run.bases)?;
                 // Echoed on stdout so the caller can key `logs/<uuid>/logs.log`
                 // and the `runs/<uuid>/` files to the same id.
@@ -92,6 +154,7 @@ fn main() -> anyhow::Result<()> {
                 let strategy = Momentum::builder()
                     .run(run.clone())
                     .config(strategy_config)
+                    .maybe_cmc(cmc)
                     .build();
                 let instrument_ids = momentum::instrument_ids(&run.bases);
                 run_engine(&run, &data_dir, &instrument_ids, strategy)?;

@@ -3,8 +3,10 @@
 //! `runs/<uuid>/config.csv` ([`config_rows`]), and the market it trades
 //! ([`VENUE`], [`TIMEFRAME`], [`instrument_ids`]).
 
+use std::path::PathBuf;
+
 use anyhow::{Result, ensure};
-use clap::Args as ClapArgs;
+use clap::{Args as ClapArgs, ValueEnum};
 use nautilus_model::{enums::BarAggregation, identifiers::InstrumentId};
 
 use crate::{period::HoldingPeriod, strategy::common::Market};
@@ -23,6 +25,31 @@ pub const MARKET: Market = Market {
     timeframe: TIMEFRAME,
 };
 
+/// Where the strategy's tradeable universe — and, at each rebalance, its
+/// eligible-to-hold set — comes from.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, ValueEnum)]
+pub enum Source {
+    /// The fixed `--universe` file, scored and ranked in full every rebalance.
+    #[default]
+    Bybit,
+    /// CoinMarketCap's historical top-N by market cap *as of each rebalance
+    /// date* gates which names are eligible to hold; the score is unchanged
+    /// (still the composite over Bybit daily closes). Needs
+    /// `make snapshot_cmc_history` + `make cmc_resolution` first.
+    Coinmarketcap,
+}
+
+impl Source {
+    /// The `runs/<uuid>/config.csv` `source` value.
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Bybit => "bybit",
+            Self::Coinmarketcap => "coinmarketcap",
+        }
+    }
+}
+
 /// Momentum flags. Defaults are a reasonable starting point; every knob here is
 /// tunable per run.
 #[derive(ClapArgs, Debug)]
@@ -32,7 +59,7 @@ pub struct Args {
     pub fast_days: u32,
 
     /// Medium-momentum lookback, in daily bars.
-    #[arg(long, default_value_t = 3)]
+    #[arg(long, default_value_t = 30)]
     pub medium_days: u32,
 
     /// Slow-momentum lookback, in daily bars.
@@ -74,11 +101,11 @@ pub struct Args {
     /// Flatten the whole book to cash whenever BTC's trailing return over
     /// `--regime-lookback-days` is negative. Off by default; when on, the
     /// universe must contain `BTC`.
-    #[arg(long, action = clap::ArgAction::Set, default_value_t = true)]
+    #[arg(long, action = clap::ArgAction::Set, default_value_t = false)]
     pub regime_filter: bool,
 
     /// Gross exposure as a fraction of account equity, per rebalance.
-    #[arg(long, default_value_t = 0.8)]
+    #[arg(long, default_value_t = 1.0)]
     pub risk_fraction: f64,
 
     /// Within-side tilt toward higher-conviction names. `0.0` = equal dollars
@@ -95,6 +122,26 @@ pub struct Args {
     /// re-ranked and its top-`n` / bottom-`n` delta is traded.
     #[arg(long, default_value_t = 7)]
     pub number_holding_periods: u32,
+
+    /// Universe source: `bybit` ranks the fixed `--universe`; `coinmarketcap`
+    /// gates the eligible set each rebalance by CoinMarketCap's historical
+    /// top-N by market cap as of that date (the score is unchanged). With
+    /// `coinmarketcap`, `--universe` is ignored — the traded set is derived
+    /// from the snapshots. Run `make snapshot_cmc_history` + `make
+    /// cmc_resolution` first.
+    #[arg(long, value_enum, default_value_t = Source::Bybit)]
+    pub source: Source,
+
+    /// [`--source coinmarketcap`] the `coins/cmc/<YYYYMMDD>.csv` snapshot
+    /// directory.
+    #[arg(long, default_value = "coins/cmc")]
+    pub cmc_snapshots: PathBuf,
+
+    /// [`--source coinmarketcap`] snapshot depth that counts as "in the top-N"
+    /// each rebalance (`200` = the whole snapshot). Must be ≥ `--top-n +
+    /// --short-n`.
+    #[arg(long, default_value_t = 200)]
+    pub cmc_top_n: usize,
 }
 
 /// The resolved, validated momentum configuration the strategy holds.
@@ -121,6 +168,12 @@ pub struct Config {
     pub holding_period: HoldingPeriod,
     /// Number of `holding_period` units between full re-ranks.
     pub number_holding_periods: u32,
+    /// Where the universe (and the per-rebalance eligible set) comes from.
+    pub source: Source,
+    /// `--source coinmarketcap`: the snapshot directory.
+    pub cmc_snapshots: PathBuf,
+    /// `--source coinmarketcap`: snapshot depth treated as the top-N.
+    pub cmc_top_n: usize,
 }
 
 /// Validate a parsed [`Args`] against the traded universe and resolve it into
@@ -197,6 +250,16 @@ pub fn build(args: &Args, bases: &[String]) -> Result<Config> {
          reads BTC's trailing return"
     );
 
+    if args.source == Source::Coinmarketcap {
+        ensure!(
+            args.cmc_top_n >= args.top_n + args.short_n,
+            "--cmc-top-n ({}) must be >= --top-n + --short-n ({}); the eligible \
+             pool would be smaller than the book",
+            args.cmc_top_n,
+            args.top_n + args.short_n
+        );
+    }
+
     Ok(Config {
         fast_days: args.fast_days,
         medium_days: args.medium_days,
@@ -213,13 +276,16 @@ pub fn build(args: &Args, bases: &[String]) -> Result<Config> {
         allocation_tilt: args.allocation_tilt,
         holding_period: args.holding_period,
         number_holding_periods: args.number_holding_periods,
+        source: args.source,
+        cmc_snapshots: args.cmc_snapshots.clone(),
+        cmc_top_n: args.cmc_top_n,
     })
 }
 
 /// The rows this strategy appends to `runs/<uuid>/config.csv`, after the
 /// shared run rows.
 pub fn config_rows(cfg: &Config) -> Vec<(String, String)> {
-    vec![
+    let mut rows = vec![
         ("fast_days".to_string(), cfg.fast_days.to_string()),
         ("medium_days".to_string(), cfg.medium_days.to_string()),
         ("slow_days".to_string(), cfg.slow_days.to_string()),
@@ -247,15 +313,28 @@ pub fn config_rows(cfg: &Config) -> Vec<(String, String)> {
             "number_holding_periods".to_string(),
             cfg.number_holding_periods.to_string(),
         ),
-    ]
+        ("source".to_string(), cfg.source.as_str().to_string()),
+    ];
+    if cfg.source == Source::Coinmarketcap {
+        rows.push((
+            "cmc_snapshots_dir".to_string(),
+            cfg.cmc_snapshots.display().to_string(),
+        ));
+        rows.push(("cmc_top_n".to_string(), cfg.cmc_top_n.to_string()));
+    }
+    rows
 }
 
-/// Bybit linear-perp instrument ids for `bases` (`BTC` → `BTCUSDT-LINEAR.BYBIT`).
+/// The Bybit linear-perp instrument id for a base coin
+/// (`BTC` → `BTCUSDT-LINEAR.BYBIT`).
+#[must_use]
+pub fn instrument_id(base: &str) -> InstrumentId {
+    InstrumentId::from(format!("{base}USDT-LINEAR.{VENUE}").as_str())
+}
+
+/// [`instrument_id`] for every base in `bases`.
 pub fn instrument_ids(bases: &[String]) -> Vec<InstrumentId> {
-    bases
-        .iter()
-        .map(|base| InstrumentId::from(format!("{base}USDT-LINEAR.{VENUE}").as_str()))
-        .collect()
+    bases.iter().map(|base| instrument_id(base)).collect()
 }
 
 #[cfg(test)]
@@ -289,7 +368,7 @@ mod tests {
     fn defaults_are_stable() {
         let cfg = build(&args(&[]), &bases(20)).unwrap();
         assert_eq!(cfg.fast_days, 7);
-        assert_eq!(cfg.medium_days, 3);
+        assert_eq!(cfg.medium_days, 30);
         assert_eq!(cfg.slow_days, 30);
         assert_eq!(cfg.fast_weight, 0.3);
         assert_eq!(cfg.medium_weight, 0.0);
@@ -298,11 +377,42 @@ mod tests {
         assert_eq!(cfg.short_n, 5);
         assert_eq!(cfg.long_short_balance, 0.5);
         assert_eq!(cfg.regime_lookback_days, 30);
-        assert!(cfg.regime_filter);
-        assert_eq!(cfg.risk_fraction, 0.8);
+        assert!(!cfg.regime_filter);
+        assert_eq!(cfg.risk_fraction, 1.0);
         assert_eq!(cfg.allocation_tilt, 0.0);
         assert_eq!(cfg.holding_period, HoldingPeriod::Day);
         assert_eq!(cfg.number_holding_periods, 7);
+        assert_eq!(cfg.source, Source::Bybit);
+        assert_eq!(cfg.cmc_snapshots.as_os_str(), "coins/cmc");
+        assert_eq!(cfg.cmc_top_n, 200);
+    }
+
+    #[test]
+    fn cmc_source_flows_through_and_gates_cmc_top_n() {
+        let cfg = build(
+            &args(&["--source", "coinmarketcap", "--cmc-top-n", "50"]),
+            &bases(20),
+        )
+        .unwrap();
+        assert_eq!(cfg.source, Source::Coinmarketcap);
+        assert_eq!(cfg.cmc_top_n, 50);
+
+        // default top-n 5 + short-n 5 = 10 <= 50: fine. Now make it fail.
+        let err = build(
+            &args(&["--source", "coinmarketcap", "--cmc-top-n", "8"]),
+            &bases(20),
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(err.contains("--cmc-top-n"), "{err}");
+    }
+
+    #[test]
+    fn cmc_top_n_is_inert_for_the_bybit_source() {
+        // absurd --cmc-top-n is fine when --source is bybit (the default)
+        let cfg = build(&args(&["--cmc-top-n", "1"]), &bases(20)).unwrap();
+        assert_eq!(cfg.cmc_top_n, 1);
+        assert_eq!(cfg.source, Source::Bybit);
     }
 
     #[test]

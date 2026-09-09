@@ -18,6 +18,10 @@
 #   --annotate            every input symbol, in order, as a universe file: a
 #                         tradeable name as its Bybit base coin, a stablecoin or
 #                         a name with no Bybit perp commented out with the reason
+#   --map                 every input symbol as "SYMBOL,BYBIT_BASE,STATUS" —
+#                         STATUS is listed|stablecoin|unlisted, BYBIT_BASE empty
+#                         for the latter two. A machine-readable resolution table
+#                         (used by `momentum --source coinmarketcap`).
 # A "listed N / stablecoin S / unlisted U / total M" summary goes to stderr.
 #
 # Usage:
@@ -37,6 +41,7 @@ while [[ $# -gt 0 ]]; do
     --listed)   mode="listed" ;;
     --missing)  mode="missing" ;;
     --annotate) mode="annotate" ;;
+    --map)      mode="map" ;;
     -*) echo "unknown argument: $1" >&2; exit 2 ;;
     *) files+=("$1") ;;
   esac
@@ -136,9 +141,12 @@ n_listed=0
 n_stable=0
 n_unlisted=0
 for s in "${symbols[@]}"; do
-  if [[ "$mode" == "annotate" && -n "${EXCLUDED[$s]:-}" ]]; then
+  if [[ ( "$mode" == "annotate" || "$mode" == "map" ) && -n "${EXCLUDED[$s]:-}" ]]; then
     n_stable=$((n_stable + 1))
-    echo "# ${s}   # stablecoin / derivative"
+    case "$mode" in
+      annotate) echo "# ${s}   # stablecoin / derivative" ;;
+      map)      echo "${s},,stablecoin" ;;
+    esac
     continue
   fi
 
@@ -148,6 +156,7 @@ for s in "${symbols[@]}"; do
     case "$mode" in
       report)          echo "$s: listed ($match)" ;;
       listed|annotate) echo "${match%USDT}" ;;
+      map)             echo "${s},${match%USDT},listed" ;;
     esac
   else
     n_unlisted=$((n_unlisted + 1))
@@ -155,11 +164,12 @@ for s in "${symbols[@]}"; do
       report)   echo "$s: missing" ;;
       missing)  echo "$s" ;;
       annotate) echo "# ${s}   # no Bybit USDT perp" ;;
+      map)      echo "${s},,unlisted" ;;
     esac
   fi
 done
 
-if [[ "$mode" == "annotate" ]]; then
+if [[ "$mode" == "annotate" || "$mode" == "map" ]]; then
   echo "listed ${n_listed} / stablecoin ${n_stable} / unlisted ${n_unlisted} / total ${#symbols[@]}" >&2
 else
   echo "listed ${n_listed} / total ${#symbols[@]}" >&2
